@@ -1,0 +1,50 @@
+# ===== 비밀값 / 환경 변수 =====
+# 공개 저장소이므로 키가 한 번이라도 커밋되면 즉시 폐기해야 합니다.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+credentials.json
+
+# ===== 파이썬 =====
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+
+# ===== 테스트 / 린트 캐시 =====
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ===== LLM 응답 캐시 (재생성 가능, 용량이 큼) =====
+.cache/
+*.langchain.db
+llm_cache.sqlite*
+
+# ===== 실행 로그 / 실험 산출물 =====
+logs/
+runs/
+*.log
+
+# 주의: data/snapshots/ 의 주가 스냅샷은 평가 재현성을 위해 일부러 커밋합니다.
+#       여기에 data/ 를 통째로 추가하지 마십시오.
+
+# ===== 노트북 =====
+.ipynb_checkpoints/
+
+# ===== 에디터 / OS =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
