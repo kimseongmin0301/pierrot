@@ -13,6 +13,9 @@ dependencies = [
     "langchain-ollama>=0.2",
     "langchain-community>=0.3",
     "python-dotenv>=1.0",
+    "finance-datareader>=0.9.50",
+    "pandas>=2.0",
+    "pyarrow>=15.0",
 ]
 
 [project.optional-dependencies]
