@@ -61,6 +61,9 @@ class PriceVerification:
     precision: DatePrecision = DatePrecision.UNKNOWN
     trading_days: int = 0
     tolerance: float = 0.0
+    price_basis: str = ""
+    """값 주장을 어떤 시세로 판정했는지. '원주가' 또는 '수정주가'."""
+
     evidence: list[str] = field(default_factory=list)
 
     @property
@@ -116,7 +119,13 @@ def verify_price_claim(
         PriceAssertion.HIGH,
         PriceAssertion.LOW,
     )
-    if skip_adjusted_levels and is_level and snapshot.is_adjusted(code):
+    # 원주가가 있으면 보정 여부와 무관하게 값 주장을 판정할 수 있습니다.
+    if (
+        skip_adjusted_levels
+        and is_level
+        and not snapshot.has_raw(code)
+        and snapshot.is_adjusted(code)
+    ):
         return PriceVerification(
             Verdict.UNVERIFIABLE,
             f"{query.stock.name}은 분할·합병으로 과거 시세가 보정된 종목입니다"
@@ -164,15 +173,20 @@ def _verify_level(
             precision=window.precision,
         )
 
+    # 값 주장은 원주가(당시 실제 호가)로 보는 것이 맞습니다.
+    # LLM 이 말하는 "그날 얼마였다"는 보정된 시세가 아니라 당시 호가를 가리킵니다.
+    use_raw = snapshot.has_raw(code)
+    basis = "원주가" if use_raw else "수정주가"
+
     assertion = query.parsed.assertion
     if assertion is PriceAssertion.CLOSE:
-        observed_low = min(row.close for row in rows)
-        observed_high = max(row.close for row in rows)
+        observed_low = min(row.level("close", prefer_raw=use_raw) for row in rows)
+        observed_high = max(row.level("close", prefer_raw=use_raw) for row in rows)
         what = "종가"
     else:
         # 고점·저점 주장은 "그 가격에 닿았는가"를 봅니다.
-        observed_low = min(row.low for row in rows)
-        observed_high = max(row.high for row in rows)
+        observed_low = min(row.level("low", prefer_raw=use_raw) for row in rows)
+        observed_high = max(row.level("high", prefer_raw=use_raw) for row in rows)
         what = "고가" if assertion is PriceAssertion.HIGH else "저가"
 
     claimed_low = min(query.parsed.value_low, query.parsed.value_high)
@@ -194,7 +208,7 @@ def _verify_level(
     )
 
     reason = (
-        f"{query.stock.name} {window.describe()} 실제 {what} {observed_text}, "
+        f"{query.stock.name} {window.describe()} 실제 {what}({basis}) {observed_text}, "
         f"주장 {claimed_text}"
     )
     if not supported:
@@ -212,7 +226,8 @@ def _verify_level(
         precision=window.precision,
         trading_days=len(rows),
         tolerance=tolerance,
-        evidence=_evidence_lines(rows),
+        price_basis=basis,
+        evidence=_evidence_lines(rows, prefer_raw=use_raw),
     )
 
 
@@ -286,14 +301,18 @@ def _verify_change_rate(
         precision=query.window.precision,
         trading_days=len(start_rows) + len(end_rows),
         tolerance=tolerance_pp,
-        evidence=_evidence_lines(start_rows[:2] + end_rows[-2:]),
+        price_basis="수정주가",
+        evidence=_evidence_lines(start_rows[:2] + end_rows[-2:], prefer_raw=False),
     )
 
 
-def _evidence_lines(rows: list[PriceRow]) -> list[str]:
+def _evidence_lines(rows: list[PriceRow], *, prefer_raw: bool = True) -> list[str]:
     """판정 근거로 보여 줄 실제 시세 몇 줄."""
     return [
-        f"{row.date} 시가 {row.open:,.0f} 고가 {row.high:,.0f} "
-        f"저가 {row.low:,.0f} 종가 {row.close:,.0f} ({row.change * 100:+.2f}%)"
+        f"{row.date} 시가 {row.level('open', prefer_raw=prefer_raw):,.0f} "
+        f"고가 {row.level('high', prefer_raw=prefer_raw):,.0f} "
+        f"저가 {row.level('low', prefer_raw=prefer_raw):,.0f} "
+        f"종가 {row.level('close', prefer_raw=prefer_raw):,.0f} "
+        f"({row.change * 100:+.2f}%)"
         for row in rows[:6]
     ]

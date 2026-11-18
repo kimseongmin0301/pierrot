@@ -31,6 +31,13 @@ SNAPSHOT_FILENAME = "kospi_ohlcv.parquet"
 
 COLUMNS = ["code", "date", "open", "high", "low", "close", "volume", "change"]
 
+RAW_COLUMNS = ["open_raw", "high_raw", "low_raw", "close_raw"]
+"""원주가(수정되지 않은 당시 실제 호가) 컬럼. 선택 사항입니다.
+
+있으면 "얼마였다"는 값 주장을 원주가로 판정하고, 없으면 수정주가로 보정된 종목의
+값 주장은 판정하지 않습니다. 등락률 주장은 어느 경우에도 수정주가를 씁니다.
+"""
+
 
 class SnapshotMissingError(FileNotFoundError):
     """스냅샷 파일이 없습니다."""
@@ -90,6 +97,28 @@ class PriceRow:
     change: float
     """전일 종가 대비 등락률. 0.05 이면 5% 상승입니다."""
 
+    open_raw: float | None = None
+    high_raw: float | None = None
+    low_raw: float | None = None
+    close_raw: float | None = None
+    """원주가. 수집하지 않았으면 None 입니다."""
+
+    @property
+    def has_raw(self) -> bool:
+        return self.close_raw is not None
+
+    def level(self, field: str, *, prefer_raw: bool = True) -> float:
+        """값 주장 판정에 쓸 가격을 돌려줍니다.
+
+        원주가가 있으면 그쪽을 씁니다. LLM 이 말하는 "그날 얼마였다"는 당시 호가를
+        가리키므로, 보정된 시세와 비교하면 맞는 주장을 틀렸다고 판정하게 됩니다.
+        """
+        if prefer_raw:
+            value = getattr(self, f"{field}_raw", None)
+            if value is not None:
+                return value
+        return float(getattr(self, field))
+
 
 @dataclass(frozen=True)
 class ChangeResult:
@@ -127,7 +156,9 @@ class PriceSnapshot:
         missing = [column for column in COLUMNS if column not in frame.columns]
         if missing:
             raise ValueError(f"스냅샷에 없는 컬럼: {missing}")
-        frame = frame[COLUMNS].copy()
+        present_raw = [c for c in RAW_COLUMNS if c in frame.columns]
+        self._raw_columns = present_raw if len(present_raw) == len(RAW_COLUMNS) else []
+        frame = frame[COLUMNS + self._raw_columns].copy()
         frame["date"] = pd.to_datetime(frame["date"]).dt.date
         self._frame = frame.sort_values(["code", "date"]).reset_index(drop=True)
         self._by_code = {
@@ -150,7 +181,9 @@ class PriceSnapshot:
     @classmethod
     def from_records(cls, records: list[dict]) -> "PriceSnapshot":
         """테스트에서 손으로 만든 데이터로 스냅샷을 만듭니다."""
-        return cls(pd.DataFrame(records, columns=COLUMNS))
+        has_raw = any(column in record for record in records for column in RAW_COLUMNS)
+        columns = COLUMNS + (RAW_COLUMNS if has_raw else [])
+        return cls(pd.DataFrame(records, columns=columns))
 
     # -- 기본 정보 ---------------------------------------------------------
 
@@ -174,6 +207,13 @@ class PriceSnapshot:
         return len(self._frame)
 
     # -- 수정주가 탐지 -----------------------------------------------------
+
+    def has_raw(self, code: str | None = None) -> bool:
+        """원주가 컬럼이 채워져 있는지."""
+        if not self._raw_columns:
+            return False
+        frame = self._rows_for(code) if code else self._frame
+        return bool(frame["close_raw"].notna().all())
 
     def tick_validity(self, code: str) -> float:
         """종가가 KRX 호가 단위에 맞는 비율. 1.0 이면 원본 호가입니다."""
@@ -217,6 +257,12 @@ class PriceSnapshot:
 
     @staticmethod
     def _to_row(record: pd.Series) -> PriceRow:
+        def raw(name: str) -> float | None:
+            if name not in record.index:
+                return None
+            value = record[name]
+            return None if pd.isna(value) else float(value)
+
         return PriceRow(
             code=str(record["code"]),
             date=to_date(record["date"]),
@@ -226,6 +272,10 @@ class PriceSnapshot:
             close=float(record["close"]),
             volume=float(record["volume"]),
             change=float(record["change"]),
+            open_raw=raw("open_raw"),
+            high_raw=raw("high_raw"),
+            low_raw=raw("low_raw"),
+            close_raw=raw("close_raw"),
         )
 
     def row_on(self, code: str, day: str | date) -> PriceRow | None:

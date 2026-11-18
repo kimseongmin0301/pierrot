@@ -276,3 +276,97 @@ def test_reason_is_human_readable(snapshot):
     assert "삼성전자" in result.reason
     assert "71,800원" in result.reason
     assert result.evidence and "2024-04-09" in result.evidence[0]
+
+
+# ---------------------------------------------------------------------------
+# 원주가가 있을 때 (수정주가 종목도 값 주장을 판정할 수 있습니다)
+# ---------------------------------------------------------------------------
+
+# 셀트리온처럼 보정된 종목을 흉내 냅니다.
+# close 는 보정된 값(호가 단위에 맞지 않음), close_raw 는 당시 실제 호가입니다.
+ADJUSTED_RECORDS = [
+    {"code": "068270", "date": "2024-04-09", "open": 166604, "high": 167217,
+     "low": 158975, "close": 158975, "volume": 1, "change": -0.038,
+     "open_raw": 189000, "high_raw": 190000, "low_raw": 180000, "close_raw": 180000},
+    {"code": "068270", "date": "2024-04-10", "open": 158975, "high": 162111,
+     "low": 157333, "close": 161234, "volume": 1, "change": 0.014,
+     "open_raw": 180000, "high_raw": 183500, "low_raw": 178000, "close_raw": 182500},
+]
+
+
+@pytest.fixture
+def adjusted_snapshot() -> PriceSnapshot:
+    return PriceSnapshot.from_records(ADJUSTED_RECORDS)
+
+
+def make_celltrion_query(**kwargs):
+    base = dict(
+        is_price_claim=True,
+        company="셀트리온",
+        assertion=PriceAssertion.CLOSE,
+        point_date_expr="2024년 4월 9일",
+        start_date_expr="",
+        end_date_expr="",
+        direction=Direction.NONE,
+        value_low=0.0,
+        value_high=0.0,
+        note="",
+    )
+    base.update(kwargs)
+    return build_query(ParsedPriceClaim(**base))
+
+
+def test_snapshot_detects_raw_columns(adjusted_snapshot):
+    assert adjusted_snapshot.has_raw("068270") is True
+
+
+def test_level_claim_uses_raw_price(adjusted_snapshot):
+    """당시 실제 호가 180,000원 주장은 인정되어야 합니다.
+
+    보정된 종가(158,975원)와 비교하면 13% 차이로 모순 판정이 나옵니다.
+    원주가가 있으면 이 오탐이 사라집니다.
+    """
+    query = make_celltrion_query(value_low=180000, value_high=180000)
+    result = verify_price_claim(query, adjusted_snapshot)
+    assert result.verdict is Verdict.SUPPORTED
+    assert result.price_basis == "원주가"
+    assert result.observed_low == 180000
+
+
+def test_adjusted_price_claim_is_now_contradicted(adjusted_snapshot):
+    """반대로 보정된 값(158,975원)을 주장하면 모순입니다. 당시 호가가 아니기 때문입니다."""
+    query = make_celltrion_query(value_low=158975, value_high=158975)
+    result = verify_price_claim(query, adjusted_snapshot)
+    assert result.verdict is Verdict.CONTRADICTED
+
+
+def test_without_raw_adjusted_stock_is_skipped():
+    """원주가가 없으면 보정된 종목의 값 주장은 판정하지 않습니다."""
+    records = [
+        {k: v for k, v in row.items() if not k.endswith("_raw")}
+        for row in ADJUSTED_RECORDS
+    ]
+    snapshot = PriceSnapshot.from_records(records)
+    query = make_celltrion_query(value_low=180000, value_high=180000)
+    result = verify_price_claim(query, snapshot)
+    assert result.verdict is Verdict.UNVERIFIABLE
+    assert "보정된 종목" in result.reason
+
+
+def test_change_rate_still_uses_adjusted(adjusted_snapshot):
+    """등락률은 원주가가 있어도 수정주가로 계산합니다.
+
+    분할 전후를 비교 가능하게 만드는 것이 수정주가의 목적이기 때문입니다.
+    """
+    query = make_celltrion_query(
+        assertion=PriceAssertion.CHANGE_RATE,
+        point_date_expr="",
+        start_date_expr="2024년 4월 9일",
+        end_date_expr="2024년 4월 10일",
+        direction=Direction.UP,
+        value_low=1.4,
+        value_high=1.4,
+    )
+    result = verify_price_claim(query, adjusted_snapshot)
+    assert result.price_basis == "수정주가"
+    assert result.verdict is Verdict.SUPPORTED

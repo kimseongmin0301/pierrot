@@ -67,6 +67,8 @@ class Settings:
     ollama_embedding_model: str
 
     # --- 검증 도구 ---
+    krx_id: str
+    krx_pw: str
     dart_api_key: str
     nli_model: str
     nli_device: str
@@ -92,6 +94,8 @@ class Settings:
             ollama_generator_model=_get("OLLAMA_GENERATOR_MODEL", "gemma3:4b"),
             ollama_generator_alt_model=_get("OLLAMA_GENERATOR_ALT_MODEL", "qwen3:4b"),
             ollama_embedding_model=_get("OLLAMA_EMBEDDING_MODEL", "embeddinggemma"),
+            krx_id=_get("KRX_ID"),
+            krx_pw=_get("KRX_PW"),
             dart_api_key=_get("DART_API_KEY"),
             nli_model=_get("NLI_MODEL", "Huffon/klue-roberta-base-nli"),
             nli_device=_get("NLI_DEVICE", "cpu"),
@@ -115,6 +119,11 @@ class Settings:
             )
         return table[role]
 
+    @property
+    def has_krx_credentials(self) -> bool:
+        """원주가 수집에 필요한 KRX 자격증명이 있는지."""
+        return bool(self.krx_id and self.krx_pw)
+
     def require_openai_key(self) -> str:
         if not self.openai_api_key:
             raise RuntimeError(
@@ -126,7 +135,7 @@ class Settings:
     def masked(self) -> dict:
         """로그나 화면에 출력해도 안전한 형태로 바꿉니다 (키는 가립니다)."""
         data = asdict(self)
-        for key in ("openai_api_key", "dart_api_key"):
+        for key in ("openai_api_key", "dart_api_key", "krx_pw"):
             value = data.get(key) or ""
             data[key] = f"설정됨(길이 {len(value)})" if value else "(비어 있음)"
         return {k: (str(v) if isinstance(v, Path) else v) for k, v in data.items()}
