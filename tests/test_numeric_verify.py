@@ -278,3 +278,40 @@ def test_direction_claim_contradicted(snapshot):
     query = make_query(assertion=FinancialAssertion.DIRECTION, direction=Direction.DOWN)
     result = verify_numeric_claim(query, snapshot)
     assert result.verdict is Verdict.CONTRADICTED
+
+
+# ---------------------------------------------------------------------------
+# 어림수 주장 (실측으로 찾은 오탐)
+#
+# 정답을 아는 주장 160건으로 재 보니, 일률 5% 상한이 한 자릿수 금액에서
+# 자릿수 규칙을 무력화해 오탐률 58.8% 가 나왔습니다. 상한을 10% 로 올려
+# 0% 로 내렸습니다. 다시 느슨해지거나 조여지지 않도록 고정합니다.
+# ---------------------------------------------------------------------------
+
+
+def make_annual_snapshot(amount: int) -> FinancialSnapshot:
+    return FinancialSnapshot.from_records([
+        record(reprt_code="11011", period_label="연간", quarter=0,
+               period_months=12, amount=amount, period_end="2023.12.31",
+               bsns_year=2023),
+    ])
+
+
+@pytest.mark.parametrize(
+    "amount_text,actual,expected,note",
+    [
+        # 사람은 6조 5,669억원을 "약 7조원"이라고 말합니다. 인정해야 합니다.
+        ("7조원", 6_566_900_000_000, Verdict.SUPPORTED, "차이 6.6%"),
+        ("2조원", 2_163_200_000_000, Verdict.SUPPORTED, "차이 7.5%"),
+        # 5,753억원을 "1조원"이라고 하면 74% 과장입니다. 잡아야 합니다.
+        ("1조원", 575_300_000_000, Verdict.CONTRADICTED, "차이 73.8%"),
+        # 정확히 말한 주장은 엄격하게 봅니다.
+        ("6조 5,669억원", 6_566_900_000_000, Verdict.SUPPORTED, "정확"),
+        ("5조원", 6_566_900_000_000, Verdict.CONTRADICTED, "차이 23.9%"),
+    ],
+)
+def test_rounded_amount_claims(amount_text, actual, expected, note):
+    snapshot = make_annual_snapshot(actual)
+    query = make_query(bsns_year=2023, quarter=0, amount_text=amount_text)
+    result = verify_numeric_claim(query, snapshot)
+    assert result.verdict is expected, f"{amount_text} vs {actual} ({note}): {result.reason}"

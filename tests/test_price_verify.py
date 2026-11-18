@@ -406,11 +406,14 @@ def test_rounding_unit(value, expected_unit):
     [
         (360000, 5000),    # 만원 단위의 절반
         (71800, 359),      # 하한 0.5% 적용 (반올림 절반은 50원)
-        (70000, 3500),     # 상한 5% 적용 (반올림 절반은 5,000원)
-        (300000, 15000),   # 상한 5% 적용 (반올림 절반은 50,000원)
+        (70000, 5000),     # 만원 단위의 절반. 상한 10%(7,000원)에 닿지 않습니다
+        (300000, 30000),   # 상한 10% 적용 (반올림 절반은 50,000원)
     ],
 )
 def test_price_tolerance_for(value, expected):
+    """상한이 5%였을 때는 70,000원에 ±3,500원만 허용해, 75,700원을 "8만원"이라고
+    말한 참 주장을 모순으로 판정했습니다. 10%로 올려 고쳤습니다.
+    """
     from pierrot.tools.price_verify import price_tolerance_for
 
     assert price_tolerance_for(value) == pytest.approx(expected)
