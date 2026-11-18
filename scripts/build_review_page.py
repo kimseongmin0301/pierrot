@@ -18,7 +18,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from pierrot.extractor.quality import has_amount, looks_like_forecast  # noqa: E402
+
 CLAIMS_PATH = PROJECT_ROOT / "evaluation" / "datasets" / "sample_claims.jsonl"
+BASELINE_PATH = PROJECT_ROOT / "evaluation" / "datasets" / "sample_claims_v1.jsonl"
 DEFAULT_OUT = PROJECT_ROOT / "build" / "review.html"
 
 TYPE_TOOL = {
@@ -121,6 +124,7 @@ def load_cases(path: Path) -> list[dict]:
                     "question": row["question"],
                     "answer": row["answer"],
                     "extractorModel": row.get("extractor_model", ""),
+                    "promptVersion": row.get("prompt_version", ""),
                     "segments": build_segments(row["answer"], claims),
                     "coverage": round(coverage_ratio(row["answer"], claims) * 100),
                     "claims": [
@@ -134,6 +138,10 @@ def load_cases(path: Path) -> list[dict]:
                             "matchMode": c.get("match_mode", "NOT_FOUND"),
                             "matchRatio": c.get("match_ratio", 0.0),
                             "needsReview": c.get("match_mode") in ("FUZZY", "NOT_FOUND"),
+                            "forecastSuspect": looks_like_forecast(c["text"]),
+                            "typeSuspect": (
+                                c["claim_type"] == "NARRATIVE" and has_amount(c["text"])
+                            ),
                         }
                         for c in claims
                     ],
@@ -157,9 +165,16 @@ def summarize(cases: list[dict]) -> dict:
         "byType": by_type,
         "byMode": by_mode,
         "needsReview": sum(1 for c in claims if c["needsReview"]),
+        "forecastSuspects": sum(1 for c in claims if c["forecastSuspect"]),
+        "typeSuspects": sum(1 for c in claims if c["typeSuspect"]),
+        "narrativeZero": sum(
+            1 for case in cases
+            if not any(c["type"] == "NARRATIVE" for c in case["claims"])
+        ),
         "avgCoverage": round(sum(coverages) / len(coverages)) if coverages else 0,
         "minCoverage": min(coverages) if coverages else 0,
         "model": cases[0]["extractorModel"] if cases else "",
+        "promptVersion": cases[0]["promptVersion"] if cases else "",
     }
 
 
@@ -170,7 +185,19 @@ def main() -> int:
 
     cases = load_cases(CLAIMS_PATH)
     summary = summarize(cases)
-    payload = json.dumps({"cases": cases, "summary": summary}, ensure_ascii=False)
+
+    # 기준선(v1)이 있으면 개선 전후를 비교합니다.
+    baseline = None
+    if BASELINE_PATH.exists() and BASELINE_PATH != CLAIMS_PATH:
+        baseline_cases = load_cases(BASELINE_PATH)
+        baseline = summarize(baseline_cases)
+        if not baseline["promptVersion"]:
+            baseline["promptVersion"] = "v1"
+
+    payload = json.dumps(
+        {"cases": cases, "summary": summary, "baseline": baseline},
+        ensure_ascii=False,
+    )
 
     template = (PROJECT_ROOT / "scripts" / "review_page_template.html").read_text(
         encoding="utf-8"
@@ -184,7 +211,9 @@ def main() -> int:
     print(f"  답변 {summary['answers']}건 / 주장 {summary['claims']}개 "
           f"(답변당 평균 {summary['perAnswer']}개)")
     print(f"  평균 커버리지 {summary['avgCoverage']}% (최저 {summary['minCoverage']}%)")
-    print(f"  검토 필요 {summary['needsReview']}개")
+    print(f"  원문 검토 필요 {summary['needsReview']}개 / "
+          f"전망 의심 {summary['forecastSuspects']}개 / "
+          f"유형 의심 {summary['typeSuspects']}개")
     return 0
 
 

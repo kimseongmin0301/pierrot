@@ -39,6 +39,8 @@ warnings.filterwarnings("ignore", message=".*langchain-community.*sunset.*")
 from pierrot.config import get_settings  # noqa: E402
 from pierrot.extractor import build_extractor, extract_claims  # noqa: E402
 from pierrot.extractor.models import ClaimType, ExtractionResult, MatchMode  # noqa: E402
+from pierrot.extractor.prompts import PROMPT_VERSION  # noqa: E402
+from pierrot.extractor.quality import quality_report  # noqa: E402
 from pierrot.llm import get_cost_logger  # noqa: E402
 
 SAMPLES_PATH = PROJECT_ROOT / "evaluation" / "datasets" / "sample_answers.jsonl"
@@ -154,6 +156,22 @@ def print_summary(results: list[tuple[dict, ExtractionResult]]) -> None:
     if results:
         print()
         print(f"답변당 평균 주장 수: {total_claims / len(results):.1f}개")
+
+    # 자동 품질 점검 (휴리스틱). 사람이 어디를 먼저 볼지 정해 줍니다.
+    forecasts: list[str] = []
+    type_suspects: list[str] = []
+    for sample, result in results:
+        report = quality_report(result.claims)
+        forecasts.extend(f"{sample['id']}/{cid}" for cid in report["forecast_suspects"])
+        type_suspects.extend(f"{sample['id']}/{cid}" for cid in report["type_suspects"])
+
+    print()
+    print("자동 품질 점검 (휴리스틱이므로 최종 판단은 사람이 합니다)")
+    print(f"  전망·권고 의심     {len(forecasts):3}개"
+          + (f"  {', '.join(forecasts)}" if forecasts else ""))
+    print(f"  유형 오분류 의심   {len(type_suspects):3}개"
+          + (f"  {', '.join(type_suspects)}" if type_suspects else "")
+          + "   (금액이 있는데 NARRATIVE)")
     if review_needed:
         print(f"검토가 필요한 주장 {len(review_needed)}개: {', '.join(review_needed)}")
         print("  - [유사도 매칭]: LLM이 원문을 고쳐 적었습니다. 내용이 바뀌지 않았는지 확인하십시오.")
@@ -167,6 +185,7 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0, help="앞에서 N개만 처리합니다")
     parser.add_argument("--id", nargs="*", default=None, help="특정 샘플 ID만 처리합니다")
     parser.add_argument("--no-save", action="store_true", help="결과 파일을 쓰지 않습니다")
+    parser.add_argument("--out", type=Path, default=OUTPUT_PATH, help="결과 저장 경로")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -185,8 +204,9 @@ def main() -> int:
     logger = get_cost_logger(settings)
     spent_before = logger.month_total_usd()
 
-    print(f"분해 모델: {settings.openai_extractor_model}")
-    print(f"샘플 수  : {len(samples)}")
+    print(f"분해 모델    : {settings.openai_extractor_model}")
+    print(f"프롬프트 버전 : {PROMPT_VERSION}")
+    print(f"샘플 수      : {len(samples)}")
 
     extractor = build_extractor(settings=settings)
     results: list[tuple[dict, ExtractionResult]] = []
@@ -208,8 +228,8 @@ def main() -> int:
           f"(이번 달 누적 ${logger.month_total_usd():.6f} / 상한 ${logger.monthly_budget_usd:.2f})")
 
     if not args.no_save:
-        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with OUTPUT_PATH.open("w", encoding="utf-8", newline="\n") as handle:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        with args.out.open("w", encoding="utf-8", newline="\n") as handle:
             for sample, result in results:
                 handle.write(
                     json.dumps(
@@ -219,13 +239,22 @@ def main() -> int:
                             "question": sample["question"],
                             "answer": result.answer,
                             "extractor_model": result.model,
+                            "prompt_version": result.prompt_version,
                             "claims": [claim.model_dump() for claim in result.claims],
                         },
                         ensure_ascii=False,
                     )
                     + "\n"
                 )
-        print(f"결과 저장: {OUTPUT_PATH}")
+        print(f"결과 저장: {args.out}")
+
+        # 프롬프트 버전별 사본을 함께 남깁니다.
+        # v2 결과를 v3 실행이 덮어써서 비교 자료를 잃은 적이 있습니다.
+        archive = args.out.with_name(
+            f"{args.out.stem}_{PROMPT_VERSION}{args.out.suffix}"
+        )
+        archive.write_bytes(args.out.read_bytes())
+        print(f"버전 사본  : {archive}")
 
     return 0
 

@@ -146,6 +146,13 @@ class ExtractionResult(BaseModel):
     claims: list[Claim]
     model: str
 
+    prompt_version: str = ""
+    """어떤 버전의 프롬프트로 분해했는지.
+
+    프롬프트를 고치면 결과가 달라지므로, 지표를 비교하려면 어떤 프롬프트로 나온
+    숫자인지가 남아 있어야 합니다.
+    """
+
     @property
     def claim_count(self) -> int:
         return len(self.claims)

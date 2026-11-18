@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from ..config import Settings, get_settings
 from ..llm import get_openai_chat
 from .models import Claim, ExtractedClaimList, ExtractionResult, MatchMode
-from .prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
+from .prompts import PROMPT_VERSION, SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 # gemma3 같은 모델이 답변에 넣는 마크다운 강조 기호입니다.
 # LLM이 source_text 를 옮길 때 이 기호를 빼고 적는 일이 흔합니다.
@@ -236,7 +236,9 @@ def extract_claims(
 
     answer = answer or ""
     if not answer.strip():
-        return ExtractionResult(answer=answer, claims=[], model=model_name)
+        return ExtractionResult(
+            answer=answer, claims=[], model=model_name, prompt_version=PROMPT_VERSION
+        )
 
     raw = extractor.invoke(
         [
@@ -253,6 +255,7 @@ def assemble_result(
     *,
     model_name: str,
     id_prefix: str = "c",
+    prompt_version: str = PROMPT_VERSION,
 ) -> ExtractionResult:
     """LLM 출력에 원문 위치를 붙여 최종 결과로 만듭니다."""
     if isinstance(raw, dict):
@@ -275,4 +278,6 @@ def assemble_result(
             )
         )
 
-    return ExtractionResult(answer=answer, claims=claims, model=model_name)
+    return ExtractionResult(
+        answer=answer, claims=claims, model=model_name, prompt_version=prompt_version
+    )

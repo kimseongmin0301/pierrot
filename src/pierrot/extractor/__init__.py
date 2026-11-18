@@ -17,6 +17,13 @@ from .extractor import (
     find_span,
     resolve_span,
 )
+from .quality import (
+    has_amount,
+    looks_like_forecast,
+    quality_report,
+    suspect_forecast,
+    suspect_type,
+)
 from .models import (
     Claim,
     ClaimType,
@@ -38,5 +45,10 @@ __all__ = [
     "build_extractor",
     "extract_claims",
     "find_span",
+    "has_amount",
+    "looks_like_forecast",
+    "quality_report",
     "resolve_span",
+    "suspect_forecast",
+    "suspect_type",
 ]
