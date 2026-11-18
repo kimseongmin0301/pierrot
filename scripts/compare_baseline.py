@@ -21,6 +21,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from pierrot.tools.dart_documents import DocumentStore  # noqa: E402
 from pierrot.tools.financials import FinancialSnapshot  # noqa: E402
 from pierrot.tools.narrative_verify import verify_narrative_claim  # noqa: E402
 from pierrot.tools.nli import NliModel  # noqa: E402
@@ -66,6 +67,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="NLI 베이스라인 vs 도구 기반 검증")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--no-documents", action="store_true",
+                        help="공시 본문 없이 수치 근거만 사용합니다 (이전 설정 재현용)")
     args = parser.parse_args()
 
     claims = load_claims()
@@ -75,12 +78,14 @@ def main() -> int:
 
     financials = FinancialSnapshot.load()
     prices = PriceSnapshot.load()
+    documents = None if args.no_documents else DocumentStore.load()
 
     print("=" * 100)
     print("NLI 베이스라인 vs 도구 기반 검증")
     print("=" * 100)
     print(f"주장      : {len(claims)}개")
     print(f"재무 근거 : {financials.describe_coverage()}")
+    print(f"공시 본문 : {documents.describe() if documents else '사용 안 함'}")
     print(f"도구 판정 : {len(tools)}건 (저장된 결과 재사용)")
     print("NLI 모델 적재 중...")
 
@@ -91,7 +96,8 @@ def main() -> int:
     results = []
     for index, claim in enumerate(claims, start=1):
         verification = verify_narrative_claim(
-            claim["text"], model=model, financials=financials, prices=prices
+            claim["text"], model=model, financials=financials,
+            prices=prices, documents=documents,
         )
         key = (claim["sample_id"], claim["claim_id"])
         results.append(

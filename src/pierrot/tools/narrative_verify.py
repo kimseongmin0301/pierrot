@@ -87,6 +87,7 @@ def collect_evidence(
     *,
     financials: FinancialSnapshot | None,
     prices: PriceSnapshot | None,
+    documents=None,
     default_years: tuple[int, ...] = (2023, 2024, 2025, 2026),
 ) -> tuple[list[Evidence], list[Stock], tuple[int, ...]]:
     """주장에 등장하는 회사와 연도로 근거 문장을 모읍니다."""
@@ -96,7 +97,10 @@ def collect_evidence(
     pool: list[Evidence] = []
     for stock in stocks:
         pool.extend(
-            build_evidence(stock.code, years, financials=financials, prices=prices)
+            build_evidence(
+                stock.code, years,
+                financials=financials, prices=prices, documents=documents,
+            )
         )
     return pool, stocks, years
 
@@ -107,6 +111,7 @@ def verify_narrative_claim(
     model: NliModel,
     financials: FinancialSnapshot | None = None,
     prices: PriceSnapshot | None = None,
+    documents=None,
     entailment_threshold: float = DEFAULT_ENTAILMENT_THRESHOLD,
     contradiction_threshold: float = DEFAULT_CONTRADICTION_THRESHOLD,
     evidence_pool: list[Evidence] | None = None,
@@ -118,7 +123,7 @@ def verify_narrative_claim(
     """
     if evidence_pool is None:
         pool, stocks, years = collect_evidence(
-            claim_text, financials=financials, prices=prices
+            claim_text, financials=financials, prices=prices, documents=documents
         )
     else:
         pool = evidence_pool

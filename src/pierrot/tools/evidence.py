@@ -197,12 +197,32 @@ def price_evidence(
     return result
 
 
+def document_evidence(store, code: str, years: tuple[int, ...]) -> list[Evidence]:
+    """공시 본문에서 뽑아 둔 문장을 근거로 만듭니다.
+
+    수치에서 만든 문장으로는 "반도체 부문 실적이 개선되면서 영업이익 성장을
+    견인했다" 같은 서술을 다룰 수 없습니다. 그런 주장을 판정하려면 회사가
+    직접 쓴 문장이 있어야 합니다.
+    """
+    return [
+        Evidence(
+            text=sentence,
+            source="공시본문",
+            code=code,
+            year=0,
+            kind=f"document/{section}",
+        )
+        for section, sentence in store.sentences(code, years)
+    ]
+
+
 def build_evidence(
     code: str,
     years: tuple[int, ...],
     *,
     financials: FinancialSnapshot | None = None,
     prices: PriceSnapshot | None = None,
+    documents=None,
 ) -> list[Evidence]:
     """한 회사에 대한 근거 문장을 모읍니다."""
     result: list[Evidence] = []
@@ -211,6 +231,8 @@ def build_evidence(
             result.extend(financial_evidence(financials, code, year))
         if prices is not None:
             result.extend(price_evidence(prices, code, year))
+    if documents is not None:
+        result.extend(document_evidence(documents, code, years))
     return result
 
 
