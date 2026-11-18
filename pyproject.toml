@@ -28,3 +28,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "slow: 실제 모델을 적재하는 테스트. 기본 실행에서는 제외합니다 (pytest -m slow 로 실행).",
+]
+addopts = "-m 'not slow'"
