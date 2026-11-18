@@ -192,3 +192,70 @@ def test_real_snapshot_loads():
     assert span is not None
     assert span[0] <= date(2023, 1, 3)
     assert span[1] >= date(2026, 11, 1)
+
+
+# ---------------------------------------------------------------------------
+# 수정주가 탐지
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "price,expected",
+    [
+        (1500, 1), (3000, 5), (12000, 10), (35000, 50),
+        (83600, 100), (369000, 500), (1379000, 1000),
+    ],
+)
+def test_tick_size(price, expected):
+    """KRX 호가 단위 (2023년 1월 개편 기준)."""
+    from pierrot.tools.price import tick_size
+
+    assert tick_size(price) == expected
+
+
+@pytest.mark.parametrize(
+    "price,valid",
+    [
+        (83600, True),     # 삼성전자 실제 종가
+        (369000, True),    # POSCO홀딩스 실제 종가
+        (158975, False),   # 셀트리온 수정주가
+        (1336279, False),  # 삼성바이오로직스 수정주가
+    ],
+)
+def test_is_tick_valid(price, valid):
+    """실제 거래된 가격은 호가 단위의 배수입니다. 아니면 보정된 값입니다."""
+    from pierrot.tools.price import is_tick_valid
+
+    assert is_tick_valid(price) is valid
+
+
+def test_adjusted_detection():
+    """보정된 종목을 하드코딩하지 않고 데이터에서 찾아냅니다."""
+    records = [
+        {"code": "005930", "date": "2024-04-09", "open": 83000, "high": 84000,
+         "low": 82000, "close": 83600, "volume": 1, "change": 0.0},
+        {"code": "005930", "date": "2024-04-10", "open": 83600, "high": 84500,
+         "low": 83000, "close": 84100, "volume": 1, "change": 0.006},
+        {"code": "068270", "date": "2024-04-09", "open": 166604, "high": 167217,
+         "low": 158975, "close": 158975, "volume": 1, "change": -0.038},
+        {"code": "068270", "date": "2024-04-10", "open": 158975, "high": 162111,
+         "low": 157333, "close": 161234, "volume": 1, "change": 0.014},
+    ]
+    snapshot = PriceSnapshot.from_records(records)
+    assert snapshot.is_adjusted("005930") is False
+    assert snapshot.is_adjusted("068270") is True
+    assert snapshot.adjusted_codes() == ["068270"]
+    assert snapshot.tick_validity("005930") == 1.0
+
+
+@pytest.mark.skipif(
+    not default_snapshot_path().exists(), reason="주가 스냅샷이 아직 수집되지 않았습니다"
+)
+def test_real_snapshot_adjusted_stocks_are_few():
+    """실제 스냅샷에서 보정된 종목이 소수인지 확인합니다.
+
+    많아지면 유니버스 구성을 다시 생각해야 합니다.
+    """
+    snapshot = PriceSnapshot.load()
+    adjusted = snapshot.adjusted_codes()
+    assert len(adjusted) <= 5, f"보정된 종목이 너무 많습니다: {adjusted}"

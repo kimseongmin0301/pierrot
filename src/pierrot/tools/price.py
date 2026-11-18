@@ -40,6 +40,31 @@ def default_snapshot_path() -> Path:
     return get_settings().snapshot_dir / SNAPSHOT_FILENAME
 
 
+def tick_size(price: float) -> int:
+    """KRX 호가 단위. 2023년 1월 개편 기준입니다.
+
+    실제로 거래된 가격은 반드시 호가 단위의 배수입니다. 그렇지 않은 값이 섞여
+    있으면 수정주가로 보정된 것입니다.
+    """
+    if price < 2_000:
+        return 1
+    if price < 5_000:
+        return 5
+    if price < 20_000:
+        return 10
+    if price < 50_000:
+        return 50
+    if price < 200_000:
+        return 100
+    if price < 500_000:
+        return 500
+    return 1_000
+
+
+def is_tick_valid(price: float) -> bool:
+    return price > 0 and float(price) % tick_size(price) == 0
+
+
 def to_date(value: str | date | datetime | pd.Timestamp) -> date:
     """여러 형태의 날짜 표기를 date 로 맞춥니다."""
     if isinstance(value, datetime):
@@ -147,6 +172,37 @@ class PriceSnapshot:
 
     def __len__(self) -> int:
         return len(self._frame)
+
+    # -- 수정주가 탐지 -----------------------------------------------------
+
+    def tick_validity(self, code: str) -> float:
+        """종가가 KRX 호가 단위에 맞는 비율. 1.0 이면 원본 호가입니다."""
+        frame = self._rows_for(code)
+        if frame.empty:
+            return 0.0
+        return float(frame["close"].map(is_tick_valid).mean())
+
+    def is_adjusted(self, code: str, *, threshold: float = 0.95) -> bool:
+        """이 종목의 시세가 수정주가로 보정되었는지.
+
+        액면분할, 합병, 인적분할 같은 일이 있으면 과거 시세가 보정되어
+        **그때 실제로 거래된 가격과 달라집니다.**
+
+        이것이 왜 문제인가: LLM이 "2024년 7월 26일 주가는 85만원이었다"고 말할 때
+        그 값은 당시 호가를 가리킵니다. 보정된 시세와 비교하면 맞는 주장을
+        틀렸다고 판정하게 됩니다. 오탐은 이 프로젝트가 가장 피해야 할 오류입니다.
+
+        반대로 등락률 주장에는 수정주가가 **맞습니다.** 분할 전후를 비교 가능하게
+        만드는 것이 수정주가의 목적이기 때문입니다.
+
+        목록을 코드에 적지 않고 매번 계산하는 이유: 스냅샷을 다시 받으면 보정 대상이
+        달라질 수 있는데, 하드코딩하면 조용히 틀린 채로 남습니다.
+        """
+        return self.tick_validity(code) < threshold
+
+    def adjusted_codes(self, *, threshold: float = 0.95) -> list[str]:
+        """수정주가로 보정된 종목코드 목록."""
+        return [code for code in self._by_code if self.is_adjusted(code, threshold=threshold)]
 
     # -- 조회 -------------------------------------------------------------
 
