@@ -61,6 +61,26 @@ _SENTENCE_END = re.compile(r"(?<=[다요음])\.\s+|(?<=[다요음])\.$")
 # 표에서 뽑혀 나온 조각을 걸러 냅니다.
 _NOISE = re.compile(r"^[\s\d,.\-()%]+$")
 
+# 표가 문장처럼 이어 붙은 조각을 찾는 표지입니다.
+# 실제로 "① 당기말 (단위: 백만원) 구분 미결제약정금액 장부금액 계정과목 ..." 같은
+# 조각이 필터를 통과해, NLI 가 여기에 모순 0.995 를 주는 거짓 판정이 났습니다.
+_TABLE_MARKS = re.compile(r"[①-⑮]|단위\s*:|\(단위|\|")
+
+# 숫자와 단위가 연달아 나오면 표의 한 줄입니다.
+_NUMBER_RUN = re.compile(r"(?:[\d,]{3,}\s+){3,}")
+
+
+def looks_like_table(text: str) -> bool:
+    """표에서 뽑혀 나온 조각인지.
+
+    숫자 비율로 거르면 안 됩니다. "자기자본은 46조 5,582억원으로 전년 말 대비
+    7조 2,152억원 증가하였으며 부채비율은 73.2%를 기록하였습니다" 처럼
+    꼭 필요한 문장이 함께 사라집니다. 표 특유의 표지만 봅니다.
+    """
+    if _TABLE_MARKS.search(text):
+        return True
+    return bool(_NUMBER_RUN.search(text))
+
 
 @dataclass(frozen=True)
 class DocumentSentence:
@@ -164,7 +184,7 @@ def clean_sentences(sentences: list[str]) -> list[str]:
         text = sentence.strip()
         if not MIN_SENTENCE_LENGTH <= len(text) <= MAX_SENTENCE_LENGTH:
             continue
-        if _NOISE.match(text):
+        if _NOISE.match(text) or looks_like_table(text):
             continue
         # 숫자와 기호만으로 이루어진 비율이 높으면 표 조각입니다.
         hangul = sum(1 for ch in text if "가" <= ch <= "힣")

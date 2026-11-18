@@ -39,6 +39,7 @@ from .evidence import Evidence, build_evidence
 from .financials import FinancialSnapshot
 from .nli import NliLabel, NliModel, NliResult
 from .price import PriceSnapshot
+from .retrieval import search_by_source
 from .universe import Stock, find_all_stocks
 
 DEFAULT_ENTAILMENT_THRESHOLD = 0.7
@@ -46,6 +47,24 @@ DEFAULT_CONTRADICTION_THRESHOLD = 0.7
 """판정에 필요한 최소 확률.
 
 낮추면 판정이 늘지만 오탐도 늘어납니다. 이 값이 지표를 좌우하므로 결과에 기록합니다.
+"""
+
+DEFAULT_TOP_K = 30
+"""NLI 에 넘길 근거 문장 수.
+
+0 이면 검색 없이 전부 넘깁니다.
+
+처음에는 "검색이 약하니 전부 넘기는 것이 공정하다"고 보고 0 으로 돌렸는데
+결과가 망가졌습니다. 공시 본문까지 넣으니 주장 하나에 근거가 500개가 되고,
+그중 최댓값을 취하니 관련 없는 문장에서 거짓 모순이 쏟아졌습니다.
+
+    주장: 2023년 현대차의 배당금 지급액은 4조 6천억 원이었다
+    판정 근거로 뽑힌 문장: "... 이자율스왑 160,000 - 808 파생상품부채 ..."
+    -> 모순 0.995
+
+실제 NLI 팩트체킹은 검색으로 추린 뒤 판정합니다. 전부에 돌려 최댓값을 쓰는 것은
+표준적인 방식이 아니고, 베이스라인을 공정하게 만들기는커녕 쓰레기를 만듭니다.
+그래서 검색을 기본으로 켜고, 끈 결과도 함께 공개합니다.
 """
 
 _YEAR_PATTERN = re.compile(r"(20\d{2})\s*년")
@@ -70,6 +89,13 @@ class NarrativeVerification:
     """판정 근거가 된 문장."""
 
     evidence_count: int = 0
+    retrieved_count: int = 0
+    """검색으로 추려 NLI 에 실제로 넘긴 문장 수.
+
+    판정하지 못했을 때 "검색이 못 찾았는지" 와 "NLI 가 못 맞혔는지" 를
+    구분하려면 이 값이 필요합니다.
+    """
+
     stocks: tuple[str, ...] = ()
     years: tuple[int, ...] = ()
     threshold: float = 0.0
@@ -112,6 +138,7 @@ def verify_narrative_claim(
     financials: FinancialSnapshot | None = None,
     prices: PriceSnapshot | None = None,
     documents=None,
+    top_k: int = DEFAULT_TOP_K,
     entailment_threshold: float = DEFAULT_ENTAILMENT_THRESHOLD,
     contradiction_threshold: float = DEFAULT_CONTRADICTION_THRESHOLD,
     evidence_pool: list[Evidence] | None = None,
@@ -148,8 +175,21 @@ def verify_narrative_claim(
             years=years,
         )
 
+    # 검색으로 관련 있는 문장만 추립니다. top_k=0 이면 전부 넘깁니다.
+    retrieved = len(pool)
+    if top_k:
+        grouped: dict[str, list[str]] = {}
+        for item in pool:
+            grouped.setdefault(item.source, []).append(item.text)
+        premises = search_by_source(claim_text, grouped, per_source=top_k)
+        if not premises:
+            premises = [item.text for item in pool[:top_k]]
+        retrieved = len(premises)
+    else:
+        premises = [item.text for item in pool]
+
     results: list[NliResult] = model.predict_batch(
-        [(item.text, claim_text) for item in pool]
+        [(premise, claim_text) for premise in premises]
     )
 
     best_entail = max(results, key=lambda r: r.score(NliLabel.ENTAILMENT))
@@ -161,6 +201,7 @@ def verify_narrative_claim(
         best_entailment=entail_score,
         best_contradiction=contra_score,
         evidence_count=len(pool),
+        retrieved_count=retrieved,
         stocks=stock_names,
         years=years,
     )
@@ -192,7 +233,8 @@ def verify_narrative_claim(
 
     return NarrativeVerification(
         Verdict.UNVERIFIABLE,
-        f"근거 {len(pool)}개 중 기준({entailment_threshold:.2f})을 넘는 관계가 "
+        f"근거 {len(pool)}개 중 {retrieved}개를 검토했으나 "
+        f"기준({entailment_threshold:.2f})을 넘는 관계가 "
         f"없습니다 (최대 함의 {entail_score:.3f}, 최대 모순 {contra_score:.3f})",
         best_evidence=best_entail.premise,
         threshold=entailment_threshold,

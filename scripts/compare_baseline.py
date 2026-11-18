@@ -67,6 +67,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="NLI 베이스라인 vs 도구 기반 검증")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--top-k", type=int, default=30,
+                        help="NLI 에 넘길 근거 수. 0 이면 검색 없이 전부")
+    parser.add_argument("--out", type=Path, default=None)
     parser.add_argument("--no-documents", action="store_true",
                         help="공시 본문 없이 수치 근거만 사용합니다 (이전 설정 재현용)")
     args = parser.parse_args()
@@ -86,6 +89,7 @@ def main() -> int:
     print(f"주장      : {len(claims)}개")
     print(f"재무 근거 : {financials.describe_coverage()}")
     print(f"공시 본문 : {documents.describe() if documents else '사용 안 함'}")
+    print(f"검색      : {'top-' + str(args.top_k) if args.top_k else '사용 안 함(전부 비교)'}")
     print(f"도구 판정 : {len(tools)}건 (저장된 결과 재사용)")
     print("NLI 모델 적재 중...")
 
@@ -97,7 +101,7 @@ def main() -> int:
     for index, claim in enumerate(claims, start=1):
         verification = verify_narrative_claim(
             claim["text"], model=model, financials=financials,
-            prices=prices, documents=documents,
+            prices=prices, documents=documents, top_k=args.top_k,
         )
         key = (claim["sample_id"], claim["claim_id"])
         results.append(
@@ -110,6 +114,7 @@ def main() -> int:
                 "nli_entailment": round(verification.best_entailment, 4),
                 "nli_contradiction": round(verification.best_contradiction, 4),
                 "nli_evidence_count": verification.evidence_count,
+                "nli_retrieved_count": verification.retrieved_count,
                 "nli_best_evidence": verification.best_evidence,
                 "tool_verdict": tools.get(key, ""),
             }
@@ -120,8 +125,9 @@ def main() -> int:
     print_summary(results)
 
     if not args.no_save:
-        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with OUTPUT_PATH.open("w", encoding="utf-8", newline="\n") as handle:
+        out = args.out or OUTPUT_PATH
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w", encoding="utf-8", newline="\n") as handle:
             for row in results:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         print(f"\n결과 저장: {OUTPUT_PATH}")
