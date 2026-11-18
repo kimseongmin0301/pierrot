@@ -1,4 +1,31 @@
 """주장 분해. 답변 텍스트를 검증 가능한 최소 단위로 나눕니다.
 
-아직 구현 전입니다 (로드맵 참고: docs/plan.md 6장).
+사용 예:
+
+    from pierrot.extractor import extract_claims
+
+    result = extract_claims("삼성전자의 3분기 영업이익은 9조원입니다.")
+    for claim in result.claims:
+        print(claim.claim_type, claim.text)
 """
+
+from .extractor import assemble_result, build_extractor, extract_claims, resolve_span
+from .models import (
+    Claim,
+    ClaimType,
+    ExtractedClaim,
+    ExtractedClaimList,
+    ExtractionResult,
+)
+
+__all__ = [
+    "Claim",
+    "ClaimType",
+    "ExtractedClaim",
+    "ExtractedClaimList",
+    "ExtractionResult",
+    "assemble_result",
+    "build_extractor",
+    "extract_claims",
+    "resolve_span",
+]
