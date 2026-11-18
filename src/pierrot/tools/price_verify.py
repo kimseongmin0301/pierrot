@@ -48,12 +48,13 @@ from enum import Enum
 from .dates import DatePrecision, DateRange
 from .price import PriceRow, PriceSnapshot
 from .price_claim import Direction, PriceAssertion, PriceQuery
-
-MIN_RELATIVE_TOLERANCE = 0.005
-"""허용 오차의 하한(값 대비 비율). 반올림 차이로 모순 판정이 나는 것을 막습니다."""
-
-MAX_RELATIVE_TOLERANCE = 0.05
-"""허용 오차의 상한(값 대비 비율). "30만원" 같은 표기가 지나치게 관대해지는 것을 막습니다."""
+from .tolerance import (
+    MAX_RELATIVE_TOLERANCE,
+    MIN_RELATIVE_TOLERANCE,
+    intervals_overlap,
+    rounding_unit,
+    tolerance_for,
+)
 
 MIN_RATE_TOLERANCE_PP = 0.5
 MAX_RATE_TOLERANCE_PP = 3.0
@@ -64,42 +65,18 @@ DEFAULT_PRICE_TOLERANCE = MAX_RELATIVE_TOLERANCE
 DEFAULT_RATE_TOLERANCE_PP = MAX_RATE_TOLERANCE_PP
 
 
-def rounding_unit(value: float) -> float:
-    """숫자 표기에서 읽히는 반올림 단위.
-
-    360000 -> 10000 (만원 단위로 말했다)
-    71800  -> 100   (백원 단위로 말했다)
-    3.5    -> 0.1   (소수 첫째 자리까지 말했다)
-    """
-    if not value:
-        return 1.0
-    magnitude = abs(float(value))
-
-    text = f"{magnitude:.10f}".rstrip("0")
-    if "." in text and not text.endswith("."):
-        decimals = len(text.split(".", 1)[1])
-        return 10.0 ** (-decimals)
-
-    integer = int(round(magnitude))
-    unit = 1
-    while integer % (unit * 10) == 0 and unit < 10 ** 12:
-        unit *= 10
-    return float(unit)
-
-
 def price_tolerance_for(value: float) -> float:
     """가격 주장 하나의 허용 오차(원)."""
-    magnitude = abs(float(value))
-    half_unit = rounding_unit(magnitude) / 2
-    floor = magnitude * MIN_RELATIVE_TOLERANCE
-    ceiling = magnitude * MAX_RELATIVE_TOLERANCE
-    return min(max(half_unit, floor), ceiling)
+    return tolerance_for(value)
 
 
 def rate_tolerance_for(value: float) -> float:
     """등락률 주장 하나의 허용 오차(퍼센트포인트)."""
-    half_unit = rounding_unit(abs(float(value))) / 2
-    return min(max(half_unit, MIN_RATE_TOLERANCE_PP), MAX_RATE_TOLERANCE_PP)
+    return tolerance_for(
+        value,
+        min_absolute=MIN_RATE_TOLERANCE_PP,
+        max_absolute=MAX_RATE_TOLERANCE_PP,
+    )
 
 
 class Verdict(str, Enum):
@@ -137,10 +114,7 @@ class PriceVerification:
         return self.precision is DatePrecision.DAY
 
 
-def _interval_overlaps(
-    low_a: float, high_a: float, low_b: float, high_b: float
-) -> bool:
-    return not (high_a < low_b or high_b < low_a)
+_interval_overlaps = intervals_overlap
 
 
 def _format(value: float, unit: str) -> str:

@@ -24,8 +24,15 @@ UNITS: list[tuple[str, int]] = [
 
 SCALES: dict[str, int] = dict(UNITS)
 
-# 숫자 + 단위 묶음. "9조", "1,800억", "3.5조" 를 모두 받습니다.
-_CHUNK = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(조|억|만)?")
+SUB_SCALES: dict[str, int] = {"천": 1000, "백": 100, "십": 10}
+"""단위 앞에 붙는 배수. "9천억" 은 9 x 1000 x 1억 입니다.
+
+실제 샘플에 "7조 9천억 원" 이 나왔는데 이것을 못 읽어 7조로 파싱한 적이 있습니다.
+9천억(9000억)이 통째로 사라져 판정이 틀렸습니다.
+"""
+
+# 숫자 + (천/백/십) + 단위. "9조", "1,800억", "9천억", "3.5조" 를 모두 받습니다.
+_CHUNK = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(천|백|십)?\s*(조|억|만)?")
 
 _NEGATIVE_WORDS = ("적자", "손실", "마이너스")
 
@@ -55,17 +62,28 @@ def parse_korean_amount(text: str) -> int | None:
     plain: float | None = None
 
     for match in _CHUNK.finditer(cleaned):
-        raw_number, unit = match.group(1), match.group(2)
+        raw_number, sub_unit, unit = match.group(1), match.group(2), match.group(3)
         try:
             number = float(raw_number.replace(",", ""))
         except ValueError:
             continue
 
+        if sub_unit:
+            number *= SUB_SCALES[sub_unit]
+
         if unit:
             total += number * SCALES[unit]
             found = True
+        elif sub_unit:
+            # "9천원" 처럼 큰 단위 없이 천/백/십만 붙은 경우.
+            total += number
+            found = True
+        elif found:
+            # 단위가 이미 나온 뒤의 숫자는 나머지(원 단위)입니다.
+            # "8만 6천 700원" 의 700 이 여기 해당합니다.
+            total += number
         else:
-            # 단위 없는 숫자는 마지막 것만 기억했다가, 단위가 하나도 없을 때 씁니다.
+            # 단위가 하나도 없으면 그 숫자를 원 단위로 봅니다.
             plain = number
 
     if not found:

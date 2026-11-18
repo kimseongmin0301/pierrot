@@ -112,3 +112,33 @@ def test_roundtrip():
 )
 def test_parse_percent(text, expected):
     assert parse_percent(text) == expected
+
+
+# ---------------------------------------------------------------------------
+# 천/백/십 배수
+#
+# 실제 샘플에 "7조 9천억 원"이 나왔는데 이것을 7조로 읽어 9천억이 통째로
+# 사라진 적이 있습니다. 판정이 틀렸습니다.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("7조 9천억 원", 7_900_000_000_000),
+        ("9천억원", 900_000_000_000),
+        ("3백억원", 30_000_000_000),
+        ("5십억원", 5_000_000_000),
+        ("8만 6천 700원", 86_700),
+        ("2만 7천원", 27_000),
+        ("6만 9천 원", 69_000),
+    ],
+)
+def test_sub_unit_multipliers(text, expected):
+    assert parse_korean_amount(text) == expected
+
+
+def test_sub_unit_does_not_break_plain_numbers():
+    """천/백/십 처리를 넣어도 기존 표기가 깨지면 안 됩니다."""
+    assert parse_korean_amount("9조 1,800억원") == 9_180_000_000_000
+    assert parse_korean_amount("71,800원") == 71_800
