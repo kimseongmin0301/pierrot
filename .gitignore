@@ -16,7 +16,6 @@ __pycache__/
 venv/
 env/
 *.egg-info/
-build/
 dist/
 
 # ===== 테스트 / 린트 캐시 =====
@@ -37,7 +36,9 @@ runs/
 *.log
 
 # 생성되는 HTML 검토 페이지 (scripts/build_review_page.py 로 언제든 다시 만듭니다)
-build/
+build/*
+# 단, 결과 보고 페이지는 직접 작성한 산출물이라 커밋합니다.
+!build/stage2.html
 
 # 주의: data/snapshots/ 의 주가 스냅샷은 평가 재현성을 위해 일부러 커밋합니다.
 #       여기에 data/ 를 통째로 추가하지 마십시오.
