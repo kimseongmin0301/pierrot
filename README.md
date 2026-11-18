@@ -160,4 +160,5 @@ ssh -N -L 11434:127.0.0.1:11434 ai-server
 
 ## 문서
 
+- **[2단계 결과 요약](https://claude.ai/code/artifact/8c164260-8edc-4a60-a1ff-34aef35e8e3a)** — 도구 vs NLI 베이스라인 비교, 실측된 한계, 바로잡은 것
 - [설계 문서 (docs/plan.md)](docs/plan.md) — 배경, 모듈 구성, 평가 설계, 기술 선택 근거
