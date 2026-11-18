@@ -9,13 +9,21 @@
         print(claim.claim_type, claim.text)
 """
 
-from .extractor import assemble_result, build_extractor, extract_claims, resolve_span
+from .extractor import (
+    SpanMatch,
+    assemble_result,
+    build_extractor,
+    extract_claims,
+    find_span,
+    resolve_span,
+)
 from .models import (
     Claim,
     ClaimType,
     ExtractedClaim,
     ExtractedClaimList,
     ExtractionResult,
+    MatchMode,
 )
 
 __all__ = [
@@ -24,8 +32,11 @@ __all__ = [
     "ExtractedClaim",
     "ExtractedClaimList",
     "ExtractionResult",
+    "MatchMode",
+    "SpanMatch",
     "assemble_result",
     "build_extractor",
     "extract_claims",
+    "find_span",
     "resolve_span",
 ]

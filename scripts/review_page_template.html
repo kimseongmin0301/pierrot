@@ -1,0 +1,693 @@
+<title>PIERROT 주장 분해 검토</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Nanum+Myeongjo:wght@400;700&display=swap">
+
+<style>
+:root {
+  --ground: #f6f7f9;
+  --surface: #ffffff;
+  --surface-sunk: #eef0f4;
+  --ink: #16181d;
+  --ink-soft: #5a6070;
+  --ink-faint: #878d9c;
+  --line: #e2e5eb;
+  --line-strong: #cdd2dc;
+  --accent: #2f4b8f;
+  --numeric: #0e7c6b;
+  --price: #9a6212;
+  --narrative: #6b4a9e;
+  --flag: #b4341f;
+  --shadow: 0 1px 2px rgba(22, 24, 29, .06), 0 8px 24px -16px rgba(22, 24, 29, .22);
+
+  --sans: "IBM Plex Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
+  --serif: "Nanum Myeongjo", "Batang", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Consolas", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0f1116;
+    --surface: #171a21;
+    --surface-sunk: #11141a;
+    --ink: #e6e8ee;
+    --ink-soft: #99a0b0;
+    --ink-faint: #767d8d;
+    --line: #272b35;
+    --line-strong: #394150;
+    --accent: #8fa6e0;
+    --numeric: #4fc9b0;
+    --price: #d9a441;
+    --narrative: #ae8fe0;
+    --flag: #e8705a;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0f1116;
+  --surface: #171a21;
+  --surface-sunk: #11141a;
+  --ink: #e6e8ee;
+  --ink-soft: #99a0b0;
+  --ink-faint: #767d8d;
+  --line: #272b35;
+  --line-strong: #394150;
+  --accent: #8fa6e0;
+  --numeric: #4fc9b0;
+  --price: #d9a441;
+  --narrative: #ae8fe0;
+  --flag: #e8705a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px -16px rgba(0, 0, 0, .8);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 24px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* ---------- 머리말 ---------- */
+
+.masthead { display: flex; flex-direction: column; gap: 10px; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(26px, 4vw, 38px);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  text-wrap: balance;
+}
+
+.lede {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--ink-soft);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.meta b { color: var(--ink-soft); font-weight: 500; }
+
+/* ---------- 요약 타일 ---------- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: var(--shadow);
+}
+
+.tile .k {
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+}
+
+.tile .v {
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+}
+
+.tile .s { font-size: 12px; color: var(--ink-soft); }
+.tile.flagged .v { color: var(--flag); }
+
+/* ---------- 유형 범례 ---------- */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--surface-sunk);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.swatch {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+  flex: none;
+  transform: translateY(1px);
+}
+
+.swatch.NUMERIC { background: var(--numeric); }
+.swatch.PRICE { background: var(--price); }
+.swatch.NARRATIVE { background: var(--narrative); }
+
+.legend-item b { color: var(--ink); font-weight: 600; font-family: var(--mono); font-size: 12px; }
+
+/* ---------- 필터 ---------- */
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.chip {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
+}
+
+.chip:hover { border-color: var(--accent); color: var(--ink); }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.chip[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--surface);
+}
+
+/* ---------- 케이스 ---------- */
+
+.case {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.case-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-sunk);
+}
+
+.case-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.case-name { font-weight: 600; font-size: 16px; }
+
+.case-stats {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.coverage {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.bar {
+  width: 68px; height: 5px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  overflow: hidden;
+}
+
+.bar > i { display: block; height: 100%; background: var(--accent); }
+
+.case-question {
+  padding: 12px 20px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  border-bottom: 1px solid var(--line);
+}
+
+.case-question b {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 500;
+  margin-right: 8px;
+}
+
+.case-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+@media (max-width: 900px) {
+  .case-body { grid-template-columns: minmax(0, 1fr); }
+  .panel-answer { border-right: none !important; border-bottom: 1px solid var(--line); }
+}
+
+.panel { padding: 18px 20px 22px; min-width: 0; }
+.panel-answer { border-right: 1px solid var(--line); }
+
+.panel-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 12px;
+}
+
+/* ---------- 원문 ---------- */
+
+.answer {
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.95;
+  white-space: pre-wrap;
+  word-break: keep-all;
+}
+
+.answer mark {
+  background: transparent;
+  color: inherit;
+  padding: 1px 0 2px;
+  border-bottom: 2px solid currentColor;
+  cursor: pointer;
+  transition: background .12s;
+}
+
+.answer mark.NUMERIC { color: var(--numeric); }
+.answer mark.PRICE { color: var(--price); }
+.answer mark.NARRATIVE { color: var(--narrative); }
+.answer mark.multi { color: var(--accent); border-bottom-style: double; border-bottom-width: 4px; }
+
+.answer mark:hover,
+.answer mark.lit {
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 2px;
+}
+
+.answer .gap { color: var(--ink-faint); }
+
+/* ---------- 주장 카드 ---------- */
+
+.claims { display: flex; flex-direction: column; gap: 10px; }
+
+.claim {
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 11px 13px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+
+.claim:hover, .claim.lit { background: var(--surface-sunk); }
+.claim:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.claim.NUMERIC { border-left-color: var(--numeric); }
+.claim.PRICE { border-left-color: var(--price); }
+.claim.NARRATIVE { border-left-color: var(--narrative); }
+.claim.review { border-left-color: var(--flag); }
+
+.claim-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  flex-wrap: wrap;
+}
+
+.claim-id {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+}
+
+.tag.NUMERIC { color: var(--numeric); }
+.tag.PRICE { color: var(--price); }
+.tag.NARRATIVE { color: var(--narrative); }
+
+.tag-mode {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-faint);
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag-mode.warn { color: var(--flag); }
+
+.claim-text { font-size: 14.5px; word-break: keep-all; }
+
+.claim-source {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--line);
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--ink-soft);
+  word-break: keep-all;
+}
+
+.claim-source b {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  font-weight: 500;
+  margin-right: 6px;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- 검토 기준 ---------- */
+
+.criteria {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px 24px;
+  box-shadow: var(--shadow);
+}
+
+.criteria h2 { margin: 0 0 14px; font-size: 17px; font-weight: 600; }
+
+.criteria ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; }
+.criteria li { color: var(--ink-soft); max-width: 78ch; }
+.criteria li b { color: var(--ink); font-weight: 600; }
+
+footer {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  text-align: center;
+}
+</style>
+
+<div class="shell">
+  <header class="masthead">
+    <div class="eyebrow">PIERROT · 1단계 완료 기준 검토</div>
+    <h1>주장 분해 결과 검토</h1>
+    <p class="lede">
+      로컬 모델이 만든 금융 답변 10건을 검증 가능한 주장 단위로 나눈 결과입니다.
+      원문에서 밑줄이 그어진 구간은 주장으로 추출된 부분이고, 밑줄이 없는 구간은
+      어떤 주장에도 포함되지 않은 부분입니다. 누락이 있다면 그곳에 있습니다.
+    </p>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section class="tiles" id="tiles" aria-label="요약 지표"></section>
+
+  <section class="legend" id="legend" aria-label="주장 유형"></section>
+
+  <section class="controls" aria-label="필터">
+    <button class="chip" data-filter="all" aria-pressed="true">전체</button>
+    <button class="chip" data-filter="review" aria-pressed="false">검토 필요만</button>
+    <button class="chip" data-filter="NUMERIC" aria-pressed="false">NUMERIC</button>
+    <button class="chip" data-filter="PRICE" aria-pressed="false">PRICE</button>
+    <button class="chip" data-filter="NARRATIVE" aria-pressed="false">NARRATIVE</button>
+  </section>
+
+  <main id="cases" class="shell-cases" style="display:flex;flex-direction:column;gap:20px"></main>
+
+  <section class="criteria">
+    <h2>검토할 때 볼 것</h2>
+    <ol>
+      <li><b>누락</b> — 원문에서 밑줄이 없는 구간에 검증 가능한 진술이 남아 있는지.
+        누락된 주장은 뒤 단계에서 영원히 검증되지 않으므로 가장 치명적입니다.</li>
+      <li><b>자립성</b> — 주장 하나만 떼어 읽어도 무엇에 대한 이야기인지 알 수 있는지.
+        "그것은 5% 올랐다" 같은 문장은 검증 단계에서 조회 대상을 특정할 수 없습니다.</li>
+      <li><b>값 보존</b> — 원문의 수치와 날짜가 그대로 옮겨졌는지.
+        분해 모델이 틀린 값을 고쳐 버리면 검증할 환각 자체가 사라집니다.</li>
+      <li><b>유형 분류</b> — NUMERIC / PRICE / NARRATIVE 가 실제 검증 도구와 맞는지.
+        잘못 붙으면 엉뚱한 도구로 조회하게 됩니다.</li>
+      <li><b>지어내기</b> — 빨간 테두리가 붙은 주장의 근거 문장이 원문과 실제로 같은 뜻인지.</li>
+    </ol>
+  </section>
+
+  <footer id="footer"></footer>
+</div>
+
+<script>
+const DATA = /*__PAYLOAD__*/null;
+
+const TYPE_TOOL = {
+  NUMERIC: "DART 공시로 검증",
+  PRICE: "주가 스냅샷으로 검증",
+  NARRATIVE: "근거 문서 대조(NLI)로 검증",
+};
+
+const MODE_LABEL = {
+  EXACT: "원문 그대로",
+  WHITESPACE: "공백 차이",
+  NORMALIZED: "표기 차이",
+  FUZZY: "유사도 매칭",
+  NOT_FOUND: "원문에 없음",
+};
+
+const el = (tag, cls, text) => {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+};
+
+function renderMeta() {
+  const s = DATA.summary;
+  const meta = document.getElementById("meta");
+  const parts = [
+    ["생성 모델", "gemma3:4b (로컬)"],
+    ["분해 모델", s.model],
+    ["분해 비용", "답변 1건당 약 $0.0005"],
+  ];
+  parts.forEach(([k, v]) => {
+    const span = el("span");
+    span.append(k + " ");
+    span.append(el("b", null, v));
+    meta.append(span);
+  });
+  document.getElementById("footer").textContent =
+    "PIERROT · evaluation/datasets/sample_claims.jsonl 로부터 생성";
+}
+
+function renderTiles() {
+  const s = DATA.summary;
+  const tiles = [
+    { k: "답변", v: s.answers, s: "로컬 모델 생성" },
+    { k: "추출된 주장", v: s.claims, s: `답변당 평균 ${s.perAnswer}개` },
+    { k: "평균 커버리지", v: s.avgCoverage + "%", s: `최저 ${s.minCoverage}%` },
+    { k: "원문 확인", v: (s.byMode.EXACT + s.byMode.WHITESPACE + s.byMode.NORMALIZED), s: "원문에서 위치 확인됨" },
+    { k: "검토 필요", v: s.needsReview, s: "유사도 매칭 또는 원문에 없음", flag: true },
+  ];
+  const host = document.getElementById("tiles");
+  tiles.forEach((t) => {
+    const node = el("div", "tile" + (t.flag && t.v > 0 ? " flagged" : ""));
+    node.append(el("div", "k", t.k), el("div", "v", String(t.v)), el("div", "s", t.s));
+    host.append(node);
+  });
+}
+
+function renderLegend() {
+  const host = document.getElementById("legend");
+  Object.entries(TYPE_TOOL).forEach(([type, tool]) => {
+    const item = el("div", "legend-item");
+    item.append(el("i", "swatch " + type), el("b", null, type), el("span", null, tool));
+    item.append(el("span", null, `· ${DATA.summary.byType[type]}개`));
+    host.append(item);
+  });
+}
+
+function renderCases() {
+  const host = document.getElementById("cases");
+
+  DATA.cases.forEach((c) => {
+    const section = el("section", "case");
+    section.dataset.caseId = c.id;
+
+    const head = el("div", "case-head");
+    head.append(el("span", "case-id", c.id.toUpperCase()), el("span", "case-name", c.company));
+    const stats = el("div", "case-stats");
+    const cov = el("div", "coverage");
+    const bar = el("div", "bar");
+    const fill = el("i");
+    fill.style.width = c.coverage + "%";
+    bar.append(fill);
+    cov.append(el("span", null, "커버리지"), bar, el("span", null, c.coverage + "%"));
+    stats.append(cov, el("span", null, `주장 ${c.claims.length}개`));
+    head.append(stats);
+    section.append(head);
+
+    const question = el("div", "case-question");
+    question.append(el("b", null, "질문"), document.createTextNode(c.question));
+    section.append(question);
+
+    const body = el("div", "case-body");
+
+    const answerPanel = el("div", "panel panel-answer");
+    answerPanel.append(el("div", "panel-title", "원문 답변"));
+    const answer = el("div", "answer");
+    c.segments.forEach((seg) => {
+      if (!seg.claims.length) {
+        answer.append(el("span", "gap", seg.text));
+        return;
+      }
+      const mark = el("mark", seg.type, seg.text);
+      mark.dataset.claims = seg.claims.join(",");
+      mark.tabIndex = 0;
+      answer.append(mark);
+    });
+    answerPanel.append(answer);
+
+    const claimPanel = el("div", "panel");
+    claimPanel.append(el("div", "panel-title", "분해된 주장"));
+    const list = el("div", "claims");
+
+    c.claims.forEach((claim) => {
+      const card = el("div", "claim " + claim.type + (claim.needsReview ? " review" : ""));
+      card.dataset.claimId = claim.id;
+      card.dataset.type = claim.type;
+      card.dataset.review = String(claim.needsReview);
+      card.tabIndex = 0;
+
+      const cardHead = el("div", "claim-head");
+      cardHead.append(el("span", "claim-id", claim.id), el("span", "tag " + claim.type, claim.type));
+      let modeText = MODE_LABEL[claim.matchMode] || claim.matchMode;
+      if (claim.matchMode === "FUZZY") modeText += ` ${claim.matchRatio.toFixed(3)}`;
+      cardHead.append(el("span", "tag-mode" + (claim.needsReview ? " warn" : ""), modeText));
+      card.append(cardHead);
+
+      card.append(el("div", "claim-text", claim.text));
+
+      const source = el("div", "claim-source");
+      source.append(el("b", null, "근거 원문"), document.createTextNode(claim.sourceText));
+      card.append(source);
+
+      list.append(card);
+    });
+
+    claimPanel.append(list);
+    body.append(answerPanel, claimPanel);
+    section.append(body);
+    host.append(section);
+  });
+}
+
+function wireHighlight() {
+  const setLit = (section, ids, on) => {
+    ids.forEach((id) => {
+      section.querySelectorAll(`.claim[data-claim-id="${id}"]`).forEach((n) => n.classList.toggle("lit", on));
+      section.querySelectorAll(`mark[data-claims]`).forEach((n) => {
+        if (n.dataset.claims.split(",").includes(id)) n.classList.toggle("lit", on);
+      });
+    });
+  };
+
+  document.querySelectorAll(".case").forEach((section) => {
+    section.querySelectorAll(".claim").forEach((card) => {
+      const ids = [card.dataset.claimId];
+      card.addEventListener("mouseenter", () => setLit(section, ids, true));
+      card.addEventListener("mouseleave", () => setLit(section, ids, false));
+      card.addEventListener("focus", () => setLit(section, ids, true));
+      card.addEventListener("blur", () => setLit(section, ids, false));
+    });
+    section.querySelectorAll("mark[data-claims]").forEach((mark) => {
+      const ids = mark.dataset.claims.split(",");
+      mark.addEventListener("mouseenter", () => setLit(section, ids, true));
+      mark.addEventListener("mouseleave", () => setLit(section, ids, false));
+      mark.addEventListener("focus", () => setLit(section, ids, true));
+      mark.addEventListener("blur", () => setLit(section, ids, false));
+    });
+  });
+}
+
+function wireFilter() {
+  const chips = document.querySelectorAll(".chip");
+  chips.forEach((chip) => {
+    chip.addEventListener("click", () => {
+      chips.forEach((c) => c.setAttribute("aria-pressed", String(c === chip)));
+      const filter = chip.dataset.filter;
+
+      document.querySelectorAll(".case").forEach((section) => {
+        let visible = 0;
+        section.querySelectorAll(".claim").forEach((card) => {
+          const show =
+            filter === "all" ||
+            (filter === "review" && card.dataset.review === "true") ||
+            card.dataset.type === filter;
+          card.classList.toggle("hidden", !show);
+          if (show) visible += 1;
+        });
+        section.classList.toggle("hidden", visible === 0 && filter !== "all");
+      });
+    });
+  });
+}
+
+renderMeta();
+renderTiles();
+renderLegend();
+renderCases();
+wireHighlight();
+wireFilter();
+</script>

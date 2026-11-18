@@ -6,17 +6,29 @@ LLM에게 구조화된 JSON 출력을 강제해 주장 목록을 받고, 각 주
 
 from __future__ import annotations
 
-import re
-from typing import Any
+import difflib
+from typing import Any, NamedTuple
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from ..config import Settings, get_settings
 from ..llm import get_openai_chat
-from .models import Claim, ExtractedClaimList, ExtractionResult
+from .models import Claim, ExtractedClaimList, ExtractionResult, MatchMode
 from .prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
-_WHITESPACE = re.compile(r"\s+")
+# gemma3 같은 모델이 답변에 넣는 마크다운 강조 기호입니다.
+# LLM이 source_text 를 옮길 때 이 기호를 빼고 적는 일이 흔합니다.
+MARKDOWN_CHARS = "*_`~"
+
+# 인용 구간의 양 끝에서 달라지기 쉬운 문장부호입니다.
+# LLM이 복문의 앞 절만 떼어내면서 쉼표를 마침표로 바꾸는 일이 흔합니다.
+EDGE_PUNCTUATION = " \t\n.,;:!?\"'()[]{}"
+
+FUZZY_THRESHOLD = 0.85
+"""유사도가 이 값 이상이면 같은 구간으로 인정합니다.
+
+너무 낮추면 LLM이 지어낸 문장도 아무 데나 끼워 맞춰져 탐지 기능이 죽습니다.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -24,18 +36,33 @@ _WHITESPACE = re.compile(r"\s+")
 # ---------------------------------------------------------------------------
 
 
-def _normalize_with_map(text: str) -> tuple[str, list[int]]:
-    """공백을 하나로 줄인 문자열과, 각 글자가 원문 어디에 있었는지의 대응표를 만듭니다.
+class SpanMatch(NamedTuple):
+    """위치 탐색 결과."""
 
-    LLM이 ``source_text`` 를 옮기면서 줄바꿈을 공백으로 바꾸거나 공백 개수를 바꾸는 일이
-    흔합니다. 그 정도 차이는 "원문에 없다"고 볼 이유가 없으므로 공백을 무시하고 한 번 더
-    찾아봅니다. 대응표가 있어야 찾은 위치를 원문 좌표로 되돌릴 수 있습니다.
+    start: int
+    end: int
+    mode: MatchMode
+    ratio: float
+
+
+def _normalize_with_map(
+    text: str, *, drop_markdown: bool = False
+) -> tuple[str, list[int]]:
+    """정규화한 문자열과, 각 글자가 원문 어디에 있었는지의 대응표를 만듭니다.
+
+    대응표가 있어야 정규화된 좌표에서 찾은 위치를 원문 좌표로 되돌릴 수 있습니다.
+
+    Args:
+        text: 원본 문자열.
+        drop_markdown: True 면 마크다운 강조 기호를 제거합니다.
     """
     chars: list[str] = []
     index_map: list[int] = []
     previous_was_space = False
 
     for position, char in enumerate(text):
+        if drop_markdown and char in MARKDOWN_CHARS:
+            continue
         if char.isspace():
             if previous_was_space or not chars:
                 continue
@@ -54,20 +81,12 @@ def _normalize_with_map(text: str) -> tuple[str, list[int]]:
     return "".join(chars), index_map
 
 
-def resolve_span(answer: str, source_text: str) -> tuple[int, int] | None:
-    """``source_text`` 가 원문의 어디에 있는지 (시작, 끝) 위치를 찾습니다.
-
-    찾지 못하면 None 을 돌려줍니다. 이는 LLM이 원문에 없는 문장을 지어냈다는 신호입니다.
-    """
-    if not answer or not source_text:
-        return None
-
-    exact = answer.find(source_text)
-    if exact >= 0:
-        return (exact, exact + len(source_text))
-
-    normalized_answer, index_map = _normalize_with_map(answer)
-    normalized_source, _ = _normalize_with_map(source_text)
+def _find_in_normalized(
+    answer: str, source_text: str, *, drop_markdown: bool, mode: MatchMode
+) -> SpanMatch | None:
+    """정규화한 뒤 부분 문자열로 찾고, 원문 좌표로 되돌립니다."""
+    normalized_answer, index_map = _normalize_with_map(answer, drop_markdown=drop_markdown)
+    normalized_source, _ = _normalize_with_map(source_text, drop_markdown=drop_markdown)
     if not normalized_source:
         return None
 
@@ -77,7 +96,90 @@ def resolve_span(answer: str, source_text: str) -> tuple[int, int] | None:
 
     start = index_map[found]
     end = index_map[found + len(normalized_source) - 1] + 1
-    return (start, end)
+    return SpanMatch(start, end, mode, 1.0)
+
+
+def _find_fuzzy(answer: str, source_text: str) -> SpanMatch | None:
+    """유사도로 가장 비슷한 구간을 찾습니다.
+
+    여기까지 왔다는 것은 LLM이 원문을 제법 고쳐 적었다는 뜻이므로, 찾더라도
+    FUZZY 로 표시해 검토 대상으로 남깁니다.
+    """
+    normalized_answer, index_map = _normalize_with_map(answer, drop_markdown=True)
+    normalized_source, _ = _normalize_with_map(source_text, drop_markdown=True)
+    if not normalized_source or not normalized_answer:
+        return None
+
+    matcher = difflib.SequenceMatcher(
+        None, normalized_answer, normalized_source, autojunk=False
+    )
+    block = matcher.find_longest_match(
+        0, len(normalized_answer), 0, len(normalized_source)
+    )
+    if block.size == 0:
+        return None
+
+    # 겹치는 구간을 기준으로 source 길이만큼 창을 잡습니다.
+    window_start = max(0, block.a - block.b)
+    window_end = min(len(normalized_answer), window_start + len(normalized_source))
+    window = normalized_answer[window_start:window_end]
+
+    ratio = difflib.SequenceMatcher(None, window, normalized_source, autojunk=False).ratio()
+    if ratio < FUZZY_THRESHOLD:
+        return None
+
+    start = index_map[window_start]
+    end = index_map[window_end - 1] + 1
+    return SpanMatch(start, end, MatchMode.FUZZY, ratio)
+
+
+def find_span(answer: str, source_text: str) -> SpanMatch | None:
+    """``source_text`` 가 원문의 어디에 있는지 단계적으로 찾습니다.
+
+    1. 글자 그대로 찾기                      -> EXACT
+    2. 공백·줄바꿈 차이 무시                  -> WHITESPACE
+    3. 마크다운 기호와 양 끝 문장부호까지 무시   -> NORMALIZED
+    4. 유사도 기준(0.85)으로 인정             -> FUZZY
+    5. 그래도 못 찾음                        -> None
+
+    단계를 나누고 결과를 기록하는 이유: 모두 "찾았다"로 뭉뚱그리면 LLM이 원문을
+    얼마나 충실히 옮겼는지 알 수 없습니다. 뒤로 갈수록 품질이 나쁘다는 신호입니다.
+    """
+    if not answer or not source_text:
+        return None
+
+    exact = answer.find(source_text)
+    if exact >= 0:
+        return SpanMatch(exact, exact + len(source_text), MatchMode.EXACT, 1.0)
+
+    match = _find_in_normalized(
+        answer, source_text, drop_markdown=False, mode=MatchMode.WHITESPACE
+    )
+    if match:
+        return match
+
+    match = _find_in_normalized(
+        answer, source_text, drop_markdown=True, mode=MatchMode.NORMALIZED
+    )
+    if match:
+        return match
+
+    # 양 끝 문장부호를 벗겨내고 다시 시도합니다.
+    trimmed = source_text.strip(EDGE_PUNCTUATION)
+    if trimmed and trimmed != source_text:
+        match = _find_in_normalized(
+            answer, trimmed, drop_markdown=True, mode=MatchMode.NORMALIZED
+        )
+        if match:
+            return match
+
+    return _find_fuzzy(answer, source_text)
+
+
+def resolve_span(answer: str, source_text: str) -> tuple[int, int] | None:
+    """``find_span`` 의 결과에서 위치만 꺼냅니다."""
+    match = find_span(answer, source_text)
+    return None if match is None else (match.start, match.end)
 
 
 # ---------------------------------------------------------------------------
@@ -158,16 +260,18 @@ def assemble_result(
 
     claims: list[Claim] = []
     for index, extracted in enumerate(raw.claims, start=1):
-        span = resolve_span(answer, extracted.source_text)
+        match = find_span(answer, extracted.source_text)
         claims.append(
             Claim(
                 claim_id=f"{id_prefix}{index:02d}",
                 text=extracted.text.strip(),
                 claim_type=extracted.claim_type,
                 source_text=extracted.source_text,
-                start=span[0] if span else None,
-                end=span[1] if span else None,
-                span_found=span is not None,
+                start=match.start if match else None,
+                end=match.end if match else None,
+                span_found=match is not None,
+                match_mode=match.mode if match else MatchMode.NOT_FOUND,
+                match_ratio=match.ratio if match else 0.0,
             )
         )
 

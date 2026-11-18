@@ -11,8 +11,10 @@ from pierrot.extractor import (
     ClaimType,
     ExtractedClaim,
     ExtractedClaimList,
+    MatchMode,
     assemble_result,
     extract_claims,
+    find_span,
     resolve_span,
 )
 
@@ -56,6 +58,70 @@ def test_empty_inputs_return_none():
     """빈 입력에서 예외가 나면 안 됩니다."""
     assert resolve_span("", "무언가") is None
     assert resolve_span(ANSWER, "") is None
+
+
+# ---------------------------------------------------------------------------
+# 위치 탐색 단계별 동작
+#
+# 아래 두 가지는 실제 샘플 10건에서 실패했던 사례를 그대로 테스트로 옮긴 것입니다.
+# ---------------------------------------------------------------------------
+
+
+def test_exact_match_reports_exact_mode():
+    """글자 그대로 있으면 EXACT 입니다."""
+    match = find_span(ANSWER, "실적 발표 다음 날 주가는 5% 상승했습니다")
+    assert match is not None
+    assert match.mode is MatchMode.EXACT
+    assert match.ratio == 1.0
+
+
+def test_whitespace_match_reports_whitespace_mode():
+    """공백 차이만 있으면 WHITESPACE 입니다."""
+    answer = "삼성전자의 3분기\n영업이익은   9조원입니다."
+    match = find_span(answer, "삼성전자의 3분기 영업이익은 9조원입니다.")
+    assert match is not None
+    assert match.mode is MatchMode.WHITESPACE
+
+
+def test_markdown_emphasis_is_ignored():
+    """생성 모델이 넣은 마크다운 강조 기호 때문에 못 찾으면 안 됩니다.
+
+    실제 사례: gemma3:4b 가 "**약 135%의 높은 상승률**" 처럼 답변에 볼드를 넣었는데,
+    분해 모델이 source_text 를 옮기면서 별표를 빼고 적었습니다.
+    """
+    answer = "주가는 상승, **약 135%의 높은 상승률**을 기록하고 있습니다."
+    match = find_span(answer, "주가는 상승, 약 135%의 높은 상승률을 기록하고 있습니다.")
+    assert match is not None
+    assert match.mode is MatchMode.NORMALIZED
+    # 원문 좌표로 되돌아왔으므로 별표를 포함한 구간이 잡혀야 합니다.
+    assert "**" in answer[match.start : match.end]
+
+
+def test_clause_cut_with_changed_punctuation_is_found():
+    """복문의 앞 절만 떼어내며 쉼표를 마침표로 바꾼 경우도 찾아야 합니다.
+
+    실제 사례: 원문 "...증가한 수치이며, 매출은 68조원입니다" 에서
+    분해 모델이 "...증가한 수치이며." 로 적었습니다.
+    """
+    answer = "영업이익은 6조원을 기록했습니다. 이는 전 분기 대비 15.7% 증가한 수치이며, 매출은 68조원입니다."
+    match = find_span(answer, "이는 전 분기 대비 15.7% 증가한 수치이며.")
+    assert match is not None
+    assert match.mode is MatchMode.NORMALIZED
+
+
+def test_altered_ending_falls_back_to_fuzzy():
+    """어미까지 바꿔 적으면 FUZZY 로 찾되 검토 대상으로 남깁니다."""
+    answer = "현재 삼성전자 주가는 71,800원이며, 3분기 실적 발표를 앞두고 있습니다."
+    match = find_span(answer, "현재 삼성전자 주가는 71,800원이다.")
+    assert match is not None
+    assert match.mode is MatchMode.FUZZY
+    assert match.ratio >= 0.85
+
+
+def test_fabricated_text_is_not_force_matched():
+    """지어낸 문장이 유사도로 억지 매칭되면 탐지 기능이 죽습니다."""
+    answer = "삼성전자의 2024년 3분기 영업이익은 9조 1,800억원입니다."
+    assert find_span(answer, "카카오의 2024년 매출은 2조원을 기록했습니다") is None
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +174,24 @@ def test_unmatched_claim_is_flagged():
     assert len(unmatched) == 1
     assert unmatched[0].claim_id == "c03"
     assert unmatched[0].source_span is None
+    assert unmatched[0].match_mode is MatchMode.NOT_FOUND
+    assert unmatched[0].needs_review is True
+
+
+def test_match_mode_is_recorded_on_claims():
+    """주장마다 어떤 방식으로 위치를 찾았는지 남습니다."""
+    result = assemble_result(ANSWER, make_raw(), model_name="gpt-4o-mini")
+    assert result.claims[0].match_mode is MatchMode.EXACT
+    assert result.claims[0].needs_review is False
+    counts = result.count_by_match_mode()
+    assert counts["EXACT"] == 2
+    assert counts["NOT_FOUND"] == 1
+
+
+def test_review_needed_claims_collects_fuzzy_and_missing():
+    """검토 대상에는 못 찾은 것과 유사도로 찾은 것이 모두 들어갑니다."""
+    result = assemble_result(ANSWER, make_raw(), model_name="gpt-4o-mini")
+    assert [c.claim_id for c in result.review_needed_claims] == ["c03"]
 
 
 def test_count_by_type():

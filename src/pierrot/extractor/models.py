@@ -19,6 +19,29 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 
+class MatchMode(str, Enum):
+    """원문 위치를 어떤 방식으로 찾았는지.
+
+    분해 품질을 모니터링하기 위한 값입니다. EXACT 에서 멀어질수록 LLM이 원문을
+    그대로 옮기지 않았다는 뜻이고, NOT_FOUND 는 아예 없는 문장을 적었다는 뜻입니다.
+    """
+
+    EXACT = "EXACT"
+    """원문에 글자 그대로 있었습니다."""
+
+    WHITESPACE = "WHITESPACE"
+    """공백과 줄바꿈 차이만 있었습니다."""
+
+    NORMALIZED = "NORMALIZED"
+    """마크다운 기호나 앞뒤 문장부호 차이까지 무시하니 일치했습니다."""
+
+    FUZZY = "FUZZY"
+    """위 방법으로는 못 찾고 유사도 기준을 넘겨 인정했습니다. 검토가 필요합니다."""
+
+    NOT_FOUND = "NOT_FOUND"
+    """원문에서 찾지 못했습니다. LLM이 지어냈을 가능성이 높습니다."""
+
+
 class ClaimType(str, Enum):
     """주장의 유형. 검증 단계에서 어떤 도구를 쓸지가 여기서 갈립니다."""
 
@@ -95,11 +118,25 @@ class Claim(BaseModel):
     분해 단계에서 내용을 지어낸 것이므로 검토 대상입니다.
     """
 
+    match_mode: MatchMode = MatchMode.NOT_FOUND
+    """위치를 어떤 방식으로 찾았는지. 분해 품질 모니터링에 씁니다."""
+
+    match_ratio: float = 0.0
+    """FUZZY 로 찾았을 때의 유사도(0~1). 그 외에는 1.0 또는 0.0."""
+
     @property
     def source_span(self) -> tuple[int, int] | None:
         if self.start is None or self.end is None:
             return None
         return (self.start, self.end)
+
+    @property
+    def needs_review(self) -> bool:
+        """사람이 들여다봐야 하는 주장인지.
+
+        원문을 못 찾았거나 유사도로 겨우 찾은 경우입니다.
+        """
+        return self.match_mode in (MatchMode.NOT_FOUND, MatchMode.FUZZY)
 
 
 class ExtractionResult(BaseModel):
@@ -117,6 +154,17 @@ class ExtractionResult(BaseModel):
     def unmatched_claims(self) -> list[Claim]:
         """원문에서 위치를 찾지 못한 주장들. 분해 품질 점검에 씁니다."""
         return [claim for claim in self.claims if not claim.span_found]
+
+    @property
+    def review_needed_claims(self) -> list[Claim]:
+        """사람이 확인해야 하는 주장들 (찾지 못했거나 유사도로 겨우 찾은 것)."""
+        return [claim for claim in self.claims if claim.needs_review]
+
+    def count_by_match_mode(self) -> dict[str, int]:
+        counts: dict[str, int] = {mode.value: 0 for mode in MatchMode}
+        for claim in self.claims:
+            counts[claim.match_mode.value] += 1
+        return counts
 
     def count_by_type(self) -> dict[str, int]:
         counts: dict[str, int] = {t.value: 0 for t in ClaimType}

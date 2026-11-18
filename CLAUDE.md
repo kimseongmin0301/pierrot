@@ -47,4 +47,5 @@ LLM 답변을 검증 가능한 주장(claim) 단위로 분해하고, 근거 문�
 - [x] 미결정 사항 5개 결정 완료 (docs/plan.md 7장)
 - [x] git 저장소 설정 (github.com/kimseongmin0301/pierrot, PUBLIC)
 - [x] 0단계: 프로젝트 골격 + 응답 캐시 + 토큰·비용 로거 (scripts/check_setup.py 로 검증)
-- [ ] 1단계: 주장 분해(Claim Extraction) 모듈 ← 다음 작업
+- [ ] 1단계: 주장 분해(Claim Extraction) 모듈 ← 구현 완료, 사람 검토 대기
+- [ ] 2단계: 검증 도구(tools) — NLI, 주가, DART
