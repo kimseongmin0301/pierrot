@@ -128,10 +128,14 @@ def test_tolerance_accepts_rounded_claim(snapshot):
 
 
 def test_tolerance_is_recorded(snapshot):
-    """어떤 기준으로 판정했는지 결과에 남아야 합니다."""
+    """어떤 기준으로 판정했는지 결과에 남아야 합니다.
+
+    71,800원은 백원 단위로 말한 것이라 반올림 단위의 절반은 50원이지만,
+    하한 0.5%가 적용되어 ±359원이 됩니다.
+    """
     query = make_query(point_date_expr="2024년 4월 9일", value_low=71800, value_high=71800)
     result = verify_price_claim(query, snapshot)
-    assert result.tolerance == pytest.approx(0.03)
+    assert result.tolerance == pytest.approx(71800 * 0.005)
 
 
 # ---------------------------------------------------------------------------
@@ -369,4 +373,110 @@ def test_change_rate_still_uses_adjusted(adjusted_snapshot):
     )
     result = verify_price_claim(query, adjusted_snapshot)
     assert result.price_basis == "수정주가"
+    assert result.verdict is Verdict.SUPPORTED
+
+
+# ---------------------------------------------------------------------------
+# 허용 오차 - 주장에 적힌 자릿수에서 읽어 냅니다
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value,expected_unit",
+    [
+        (360000, 10000),   # 36만원 -> 만원 단위
+        (71800, 100),      # 71,800원 -> 백원 단위
+        (70000, 10000),    # 7만원 -> 만원 단위
+        (236000, 1000),    # 23만 6천원 -> 천원 단위
+        (300000, 100000),  # 30만원 -> 십만원 단위
+        (3.5, 0.1),        # 3.5% -> 소수 첫째 자리
+        (20, 10),          # 20% -> 십 단위
+        (135, 1),          # 135% -> 일 단위
+    ],
+)
+def test_rounding_unit(value, expected_unit):
+    """표기에서 읽히는 반올림 단위를 구합니다."""
+    from pierrot.tools.price_verify import rounding_unit
+
+    assert rounding_unit(value) == pytest.approx(expected_unit)
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (360000, 5000),    # 만원 단위의 절반
+        (71800, 359),      # 하한 0.5% 적용 (반올림 절반은 50원)
+        (70000, 3500),     # 상한 5% 적용 (반올림 절반은 5,000원)
+        (300000, 15000),   # 상한 5% 적용 (반올림 절반은 50,000원)
+    ],
+)
+def test_price_tolerance_for(value, expected):
+    from pierrot.tools.price_verify import price_tolerance_for
+
+    assert price_tolerance_for(value) == pytest.approx(expected)
+
+
+# POSCO홀딩스 2024년 4월 중순 실제 시세.
+# 종가 371,000 ~ 400,000, 장중 저가 최저도 371,000 입니다.
+POSCO_RECORDS = [
+    {"code": "005490", "date": "2024-04-11", "open": 395500, "high": 406000,
+     "low": 393500, "close": 400000, "volume": 1, "change": 0.0},
+    {"code": "005490", "date": "2024-04-15", "open": 387000, "high": 392000,
+     "low": 386000, "close": 390500, "volume": 1, "change": -0.01},
+    {"code": "005490", "date": "2024-04-17", "open": 380500, "high": 384000,
+     "low": 371000, "close": 371000, "volume": 1, "change": -0.025},
+    {"code": "005490", "date": "2024-04-19", "open": 386500, "high": 389500,
+     "low": 377000, "close": 386500, "volume": 1, "change": 0.01},
+]
+
+
+def test_posco_360k_claim_is_contradicted():
+    """실제로 겪은 미탐 사례를 고정합니다.
+
+    "2024년 4월 중순 POSCO홀딩스 주가는 36만원이었다"는 환각입니다.
+    그 기간 최저 종가가 371,000원이고 장중 저가도 371,000원이라
+    36만원은 한 번도 나온 적 없는 가격입니다.
+
+    일률 3% 허용 오차를 쓰면 하한이 359,870원이 되어 130원 차이로 통과했습니다.
+    자릿수 기반(만원 단위 -> ±5,000원)으로 바꾸면 365,000원이 상한이라 잡힙니다.
+    """
+    snapshot = PriceSnapshot.from_records(POSCO_RECORDS)
+    query = build_query(
+        ParsedPriceClaim(
+            is_price_claim=True,
+            company="POSCO홀딩스",
+            assertion=PriceAssertion.CLOSE,
+            point_date_expr="2024년 4월 중순",
+            start_date_expr="",
+            end_date_expr="",
+            direction=Direction.NONE,
+            value_low=360000,
+            value_high=360000,
+            note="",
+        )
+    )
+    result = verify_price_claim(query, snapshot)
+    assert result.verdict is Verdict.CONTRADICTED
+    assert result.tolerance == pytest.approx(5000)
+    assert result.observed_low == 371000
+
+
+def test_posco_37man_claim_is_supported():
+    """반대로 "37만원"이라고 했으면 인정해야 합니다. 어림수로 맞게 말한 것입니다."""
+    snapshot = PriceSnapshot.from_records(POSCO_RECORDS)
+    query = build_query(
+        ParsedPriceClaim(
+            is_price_claim=True,
+            company="POSCO홀딩스",
+            assertion=PriceAssertion.CLOSE,
+            point_date_expr="2024년 4월 중순",
+            start_date_expr="",
+            end_date_expr="",
+            direction=Direction.NONE,
+            value_low=370000,
+            value_high=370000,
+            note="",
+        )
+    )
+    result = verify_price_claim(query, snapshot)
     assert result.verdict is Verdict.SUPPORTED

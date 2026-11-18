@@ -13,11 +13,31 @@
 관대한 기준이라는 점은 숨기지 않습니다. 각 판정에 날짜 정밀도(DAY / RANGE)를
 남겨 두고, 평가 지표를 "전체"와 "날짜가 명확한 주장만"으로 나누어 공개합니다.
 
-## 허용 오차
+## 허용 오차 — 주장이 스스로 드러내는 정밀도를 씁니다
 
 "30만원 수준"처럼 어림수로 말한 주장을 299,500원과 비교해 틀렸다고 하면 곤란합니다.
-그래서 관측 범위를 조금 넓혀 비교합니다. 기본값은 가격 3%, 등락률 3%p 입니다.
-이 값이 판정을 좌우하므로 결과에 함께 기록합니다.
+그렇다고 일률적인 비율(예: 3%)을 쓰면 반대 방향으로 틀립니다.
+
+실제로 겪은 사례입니다. 3% 일률 적용 시
+"2024년 4월 중순 POSCO홀딩스 주가는 36만원이었다"가 근거 있음으로 통과했습니다.
+그 기간 실제 종가는 371,000~400,000원이고 장중 저가 최저도 371,000원이라
+**36만원은 한 번도 나온 적 없는 가격**인데, 3% 하한(359,870원)을 130원 차이로
+넘겨 통과한 것입니다. 환각을 놓친 것(미탐)입니다.
+
+그래서 허용 오차를 주장에 적힌 **자릿수**에서 읽어 냅니다.
+
+| 주장 표기 | 읽히는 단위 | 허용 오차 |
+|---|---|---|
+| 36만원 (360000) | 만원 | ±5,000원 |
+| 71,800원 | 백원 | ±359원 (0.5% 하한 적용) |
+| 7만원 (70000) | 만원 | ±3,500원 (5% 상한 적용) |
+
+정밀하게 말할수록 엄격하게, 어림수로 말할수록 너그럽게 봅니다.
+사람이 수치를 읽는 방식과 같고, 무엇보다 **왜 그렇게 판정했는지 설명할 수 있습니다.**
+
+하한(0.5%)과 상한(5%)을 두는 이유: 하한이 없으면 "71,800원"에 ±50원만 허용해
+반올림 차이로도 모순이 나고, 상한이 없으면 "30만원"에 ±50,000원을 허용해
+너무 관대해집니다.
 """
 
 from __future__ import annotations
@@ -29,11 +49,57 @@ from .dates import DatePrecision, DateRange
 from .price import PriceRow, PriceSnapshot
 from .price_claim import Direction, PriceAssertion, PriceQuery
 
-DEFAULT_PRICE_TOLERANCE = 0.03
-"""가격 주장의 상대 허용 오차. 0.03 이면 관측 범위를 양쪽으로 3% 넓힙니다."""
+MIN_RELATIVE_TOLERANCE = 0.005
+"""허용 오차의 하한(값 대비 비율). 반올림 차이로 모순 판정이 나는 것을 막습니다."""
 
-DEFAULT_RATE_TOLERANCE_PP = 3.0
-"""등락률 주장의 절대 허용 오차(퍼센트포인트)."""
+MAX_RELATIVE_TOLERANCE = 0.05
+"""허용 오차의 상한(값 대비 비율). "30만원" 같은 표기가 지나치게 관대해지는 것을 막습니다."""
+
+MIN_RATE_TOLERANCE_PP = 0.5
+MAX_RATE_TOLERANCE_PP = 3.0
+"""등락률 허용 오차의 하한과 상한(퍼센트포인트)."""
+
+# 이전 이름. 외부에서 참조하던 곳이 있어 남겨 둡니다.
+DEFAULT_PRICE_TOLERANCE = MAX_RELATIVE_TOLERANCE
+DEFAULT_RATE_TOLERANCE_PP = MAX_RATE_TOLERANCE_PP
+
+
+def rounding_unit(value: float) -> float:
+    """숫자 표기에서 읽히는 반올림 단위.
+
+    360000 -> 10000 (만원 단위로 말했다)
+    71800  -> 100   (백원 단위로 말했다)
+    3.5    -> 0.1   (소수 첫째 자리까지 말했다)
+    """
+    if not value:
+        return 1.0
+    magnitude = abs(float(value))
+
+    text = f"{magnitude:.10f}".rstrip("0")
+    if "." in text and not text.endswith("."):
+        decimals = len(text.split(".", 1)[1])
+        return 10.0 ** (-decimals)
+
+    integer = int(round(magnitude))
+    unit = 1
+    while integer % (unit * 10) == 0 and unit < 10 ** 12:
+        unit *= 10
+    return float(unit)
+
+
+def price_tolerance_for(value: float) -> float:
+    """가격 주장 하나의 허용 오차(원)."""
+    magnitude = abs(float(value))
+    half_unit = rounding_unit(magnitude) / 2
+    floor = magnitude * MIN_RELATIVE_TOLERANCE
+    ceiling = magnitude * MAX_RELATIVE_TOLERANCE
+    return min(max(half_unit, floor), ceiling)
+
+
+def rate_tolerance_for(value: float) -> float:
+    """등락률 주장 하나의 허용 오차(퍼센트포인트)."""
+    half_unit = rounding_unit(abs(float(value))) / 2
+    return min(max(half_unit, MIN_RATE_TOLERANCE_PP), MAX_RATE_TOLERANCE_PP)
 
 
 class Verdict(str, Enum):
@@ -96,8 +162,6 @@ def verify_price_claim(
     query: PriceQuery,
     snapshot: PriceSnapshot,
     *,
-    price_tolerance: float = DEFAULT_PRICE_TOLERANCE,
-    rate_tolerance_pp: float = DEFAULT_RATE_TOLERANCE_PP,
     skip_adjusted_levels: bool = True,
 ) -> PriceVerification:
     """조회 조건 하나를 판정합니다.
@@ -152,13 +216,11 @@ def verify_price_claim(
         )
 
     if query.parsed.assertion is PriceAssertion.CHANGE_RATE:
-        return _verify_change_rate(query, snapshot, rate_tolerance_pp)
-    return _verify_level(query, snapshot, price_tolerance)
+        return _verify_change_rate(query, snapshot)
+    return _verify_level(query, snapshot)
 
 
-def _verify_level(
-    query: PriceQuery, snapshot: PriceSnapshot, tolerance: float
-) -> PriceVerification:
+def _verify_level(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVerification:
     """CLOSE / HIGH / LOW 처럼 '얼마였다'는 주장."""
     assert query.stock is not None and query.window is not None
     code = query.stock.code
@@ -192,9 +254,14 @@ def _verify_level(
     claimed_low = min(query.parsed.value_low, query.parsed.value_high)
     claimed_high = max(query.parsed.value_low, query.parsed.value_high)
 
-    margin_low = observed_low * (1 - tolerance)
-    margin_high = observed_high * (1 + tolerance)
-    supported = _interval_overlaps(claimed_low, claimed_high, margin_low, margin_high)
+    # 관측값은 실제 데이터이므로 넓히지 않습니다.
+    # 넓혀야 할 쪽은 "어림수로 말한" 주장입니다.
+    tolerance = max(
+        price_tolerance_for(claimed_low), price_tolerance_for(claimed_high)
+    )
+    supported = _interval_overlaps(
+        claimed_low - tolerance, claimed_high + tolerance, observed_low, observed_high
+    )
 
     claimed_text = (
         _format(claimed_low, "원")
@@ -211,8 +278,9 @@ def _verify_level(
         f"{query.stock.name} {window.describe()} 실제 {what}({basis}) {observed_text}, "
         f"주장 {claimed_text}"
     )
+    reason += f" (허용 오차 ±{tolerance:,.0f}원)"
     if not supported:
-        reason += f" (허용 오차 {tolerance:.0%}를 적용해도 겹치지 않습니다)"
+        reason += " -> 겹치지 않습니다"
 
     return PriceVerification(
         verdict=Verdict.SUPPORTED if supported else Verdict.CONTRADICTED,
@@ -231,9 +299,7 @@ def _verify_level(
     )
 
 
-def _verify_change_rate(
-    query: PriceQuery, snapshot: PriceSnapshot, tolerance_pp: float
-) -> PriceVerification:
+def _verify_change_rate(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVerification:
     """두 시점 사이 등락률 주장."""
     assert query.stock is not None and query.window is not None
     assert query.start_window is not None and query.end_window is not None
@@ -263,9 +329,12 @@ def _verify_change_rate(
     observed_high = (end_high / start_low - 1) * 100
 
     claimed_low, claimed_high = _claimed_rate_interval(query)
+    tolerance_pp = max(
+        rate_tolerance_for(claimed_low), rate_tolerance_for(claimed_high)
+    )
     supported = _interval_overlaps(
-        claimed_low, claimed_high,
-        observed_low - tolerance_pp, observed_high + tolerance_pp,
+        claimed_low - tolerance_pp, claimed_high + tolerance_pp,
+        observed_low, observed_high,
     )
 
     claimed_text = (
@@ -286,8 +355,9 @@ def _verify_change_rate(
         f"{_format(end_low, '원')}~{_format(end_high, '원')}, "
         f"실제 등락률 {observed_text}, 주장 {claimed_text}"
     )
+    reason += f" (허용 오차 ±{tolerance_pp:.2f}%p)"
     if not supported:
-        reason += f" (허용 오차 {tolerance_pp:.0f}%p를 적용해도 겹치지 않습니다)"
+        reason += " -> 겹치지 않습니다"
 
     return PriceVerification(
         verdict=Verdict.SUPPORTED if supported else Verdict.CONTRADICTED,

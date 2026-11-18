@@ -30,8 +30,10 @@ from pierrot.tools.dates import DatePrecision  # noqa: E402
 from pierrot.tools.price import PriceSnapshot  # noqa: E402
 from pierrot.tools.price_claim import PARSER_VERSION, build_price_parser, parse_price_claim  # noqa: E402
 from pierrot.tools.price_verify import (  # noqa: E402
-    DEFAULT_PRICE_TOLERANCE,
-    DEFAULT_RATE_TOLERANCE_PP,
+    MAX_RATE_TOLERANCE_PP,
+    MAX_RELATIVE_TOLERANCE,
+    MIN_RATE_TOLERANCE_PP,
+    MIN_RELATIVE_TOLERANCE,
     Verdict,
     verify_price_claim,
 )
@@ -94,17 +96,24 @@ def main() -> int:
     print("=" * 104)
     print(f"스냅샷     : {len(snapshot):,}행 / {len(snapshot.codes())}종목 / {span[0]} ~ {span[1]}")
     print(f"파서       : {settings.openai_verifier_model} (파서 {PARSER_VERSION})")
-    print(f"허용 오차  : 가격 {DEFAULT_PRICE_TOLERANCE:.0%} / 등락률 {DEFAULT_RATE_TOLERANCE_PP:.0f}%p")
+    print("허용 오차  : 주장에 적힌 자릿수에서 읽어 냅니다 "
+          f"(가격 {MIN_RELATIVE_TOLERANCE:.1%}~{MAX_RELATIVE_TOLERANCE:.0%}, "
+          f"등락률 {MIN_RATE_TOLERANCE_PP:.1f}~{MAX_RATE_TOLERANCE_PP:.0f}%p 범위로 제한)")
     print(f"대상 주장  : {len(claims)}개")
+    has_raw = snapshot.has_raw()
+    print(f"시세 기준  : 값 주장 {'원주가(KRX)' if has_raw else '수정주가'} / 등락률 주장 수정주가")
     adjusted = snapshot.adjusted_codes()
     if adjusted:
         names = ", ".join(
             f"{next((st.name for st in snapshot.stocks() if st.code == c), c)}({snapshot.tick_validity(c):.0%})"
             for c in adjusted
         )
-        print(f"수정주가   : {names}")
-        print(f"             값 주장 판정 "
-              f"{'포함(오탐 위험)' if args.include_adjusted else '제외'}")
+        print(f"보정 종목  : {names}")
+        if has_raw:
+            print("             원주가가 있어 값 주장도 정상 판정합니다")
+        else:
+            print(f"             값 주장 판정 "
+                  f"{'포함(오탐 위험)' if args.include_adjusted else '제외'}")
 
     price_parser = build_price_parser(settings=settings)
     results = []
@@ -143,6 +152,7 @@ def main() -> int:
                 "observed_high": verification.observed_high,
                 "unit": verification.unit,
                 "tolerance": verification.tolerance,
+                "price_basis": verification.price_basis,
                 "price_adjusted": (
                     snapshot.is_adjusted(query.stock.code) if query.stock else False
                 ),
@@ -193,6 +203,13 @@ def print_summary(results: list[dict]) -> None:
               f"근거있음 {sub.get('SUPPORTED', 0)} / "
               f"모순 {sub.get('CONTRADICTED', 0)} / "
               f"확인불가 {sub.get('UNVERIFIABLE', 0)}")
+
+    bases = Counter(r.get("price_basis") or "-" for r in results)
+    print()
+    print("  판정에 쓴 시세")
+    for basis, count in bases.most_common():
+        label = {"-": "해당 없음(판정 불가)"}.get(basis, basis)
+        print(f"    {label:20} {count:3}개")
 
     unverifiable = [r for r in results if r["verdict"] == "UNVERIFIABLE"]
     if unverifiable:
