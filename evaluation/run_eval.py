@@ -243,6 +243,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--methods", nargs="*", default=list(METHODS), choices=METHODS)
     parser.add_argument("--no-save", action="store_true")
+    parser.add_argument("--testset", type=Path, default=TESTSET_PATH)
+    parser.add_argument("--tag", default="", help="결과 파일 이름에 붙일 꼬리표")
     args = parser.parse_args()
 
     from pierrot.config import get_settings
@@ -252,12 +254,12 @@ def main() -> int:
     logger = get_cost_logger(settings)
     spent_before = logger.month_total_usd()
 
-    claims = load_testset(TESTSET_PATH, args.limit)
+    claims = load_testset(args.testset, args.limit)
 
     print("=" * 96)
     print("평가 실행")
     print("=" * 96)
-    print(f"테스트셋: {len(claims)}개 ({TESTSET_PATH.name})")
+    print(f"테스트셋: {len(claims)}개 ({args.testset.name})")
     print(f"방법    : {', '.join(args.methods)}")
     print()
 
@@ -302,11 +304,14 @@ def main() -> int:
           f"(이번 달 누적 ${logger.month_total_usd():.6f} / 상한 ${logger.monthly_budget_usd:.2f})")
 
     if not args.no_save:
-        RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with RESULT_PATH.open("w", encoding="utf-8", newline="\n") as handle:
+        suffix = f"_{args.tag}" if args.tag else ""
+        result_path = RESULT_PATH.with_name(f"eval_results{suffix}.jsonl")
+        metrics_path = METRICS_PATH.with_name(f"eval_metrics{suffix}.json")
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        with result_path.open("w", encoding="utf-8", newline="\n") as handle:
             for row in results:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        print(f"판정 저장: {RESULT_PATH}")
+        print(f"판정 저장: {result_path}")
 
         payload = {
             key: evaluate(
@@ -314,10 +319,10 @@ def main() -> int:
             ).to_dict()
             for key in args.methods
         }
-        METRICS_PATH.write_text(
+        metrics_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        print(f"지표 저장: {METRICS_PATH}")
+        print(f"지표 저장: {metrics_path}")
     return 0
 
 

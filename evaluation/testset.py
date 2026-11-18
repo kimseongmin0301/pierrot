@@ -303,6 +303,159 @@ class TestSetBuilder:
         return claims
 
 
+    # -- 어려운 변형 ------------------------------------------------------
+    #
+    # 위 생성기는 스냅샷 값을 포맷터 표기 그대로 옮깁니다. 그래서 도구가
+    # 자기 데이터를 자기가 조회하는 꼴이 되어 쉽습니다.
+    #
+    # 실제 LLM 답변은 어림수로 말하고, 단위 표기가 다르고, 날짜가 모호합니다.
+    # 그 조건에서도 동작하는지 따로 재야 "실무에서 쓸 수 있다" 고 말할 수 있습니다.
+
+    def hard_numeric_claims(
+        self,
+        financials,
+        *,
+        years: tuple[int, ...] = (2023, 2024, 2025),
+        accounts: tuple[str, ...] = ("매출액", "영업이익"),
+    ) -> list[TestClaim]:
+        """어림수와 다른 단위 표기로 말한 주장."""
+        from pierrot.tools.amounts import format_korean_amount
+        from pierrot.tools.universe import UNIVERSE
+
+        claims: list[TestClaim] = []
+        for stock in UNIVERSE:
+            for year in years:
+                for account in accounts:
+                    facts = financials.lookup(
+                        stock.code, year, account, quarter=0, fs_div="CFS"
+                    )
+                    if not facts or facts[0].amount <= 0:
+                        continue
+                    amount = facts[0].amount
+                    source = (
+                        f"{stock.name} {year}년 연간 {account} "
+                        f"연결 {format_korean_amount(amount)}"
+                    )
+                    head = f"{stock.name}의 {year}년 {account}은"
+
+                    def add(text: str, label: str, error: str) -> None:
+                        claims.append(TestClaim(
+                            claim_id=self._next_id("hn"), text=text, label=label,
+                            claim_type="NUMERIC", error_kind=error,
+                            code=stock.code, source_fact=source,
+                        ))
+
+                    # 라벨은 연결과 별도를 **둘 다** 보고 정합니다.
+                    #
+                    # 처음에는 연결만 보고 라벨을 붙였는데, 도구는 둘 다 보므로
+                    # 별도 기준으로 맞는 주장을 "놓쳤다"고 잘못 세었습니다.
+                    # 예: 셀트리온 2024년 매출 "약 4조원"
+                    #     연결 3조 5,573억(12.4% 차이)  별도 3조 7,092억(7.8% 차이)
+                    # 기준을 밝히지 않은 주장이므로 별도와 맞으면 참입니다.
+                    separate_facts = financials.lookup(
+                        stock.code, year, account, quarter=0, fs_div="OFS"
+                    )
+                    bases = [amount]
+                    if separate_facts and separate_facts[0].amount > 0:
+                        bases.append(separate_facts[0].amount)
+
+                    def closest_gap(claimed: float) -> float:
+                        return min(abs(claimed - base) / base for base in bases)
+
+                    # 조 단위로 어림잡아 말합니다. 라벨은 실제 차이로 정합니다.
+                    cho = amount / 1e12
+                    if cho >= 1:
+                        rounded = round(cho)
+                        gap = closest_gap(rounded * 1e12)
+                        add(
+                            f"{head} 약 {rounded}조원이다.",
+                            "SUPPORTED" if gap <= 0.10 else "CONTRADICTED",
+                            "rounded" if gap <= 0.10 else "rounded_overstated",
+                        )
+
+                        # 소수 한 자리로 말합니다. 표기가 달라도 같은 값입니다.
+                        decimal = round(cho, 1)
+                        gap = closest_gap(decimal * 1e12)
+                        add(
+                            f"{head} {decimal}조원 수준이다.",
+                            "SUPPORTED" if gap <= 0.10 else "CONTRADICTED",
+                            "decimal_unit" if gap <= 0.10 else "decimal_overstated",
+                        )
+
+                    # 억 단위로만 말합니다. 조를 쓰지 않는 표기입니다.
+                    eok = round(amount / 1e8)
+                    add(f"{head} {eok:,}억원이다.", "SUPPORTED", "eok_unit")
+
+                    # 기준을 밝히지 않고 별도 수치를 말합니다.
+                    if separate_facts and separate_facts[0].amount > 0:
+                        add(
+                            f"{head} {format_korean_amount(separate_facts[0].amount)}이다.",
+                            "SUPPORTED",
+                            "separate_basis",
+                        )
+        return claims
+
+    def hard_price_claims(
+        self,
+        prices,
+        *,
+        samples_per_stock: int = 2,
+        start: str = "2024-01-01",
+        end: str = "2025-12-31",
+    ) -> list[TestClaim]:
+        """모호한 날짜와 어림수 가격으로 말한 주장."""
+        from pierrot.tools.universe import UNIVERSE
+
+        tenday = {1: "초", 2: "중순", 3: "말"}
+        claims: list[TestClaim] = []
+        available = set(prices.codes())
+
+        for stock in UNIVERSE:
+            if stock.code not in available:
+                continue
+            rows = prices.rows_between(stock.code, start, end)
+            if len(rows) < 30:
+                continue
+            use_raw = prices.has_raw(stock.code)
+
+            for row in self.random.sample(rows, min(samples_per_stock, len(rows))):
+                close = row.level("close", prefer_raw=use_raw)
+                part = tenday[min((row.date.day - 1) // 10 + 1, 3)]
+                window = prices.rows_between(
+                    stock.code,
+                    f"{row.date.year}-{row.date.month:02d}-01",
+                    f"{row.date.year}-{row.date.month:02d}-28",
+                )
+                lows = [r.level("low", prefer_raw=use_raw) for r in window]
+                highs = [r.level("high", prefer_raw=use_raw) for r in window]
+                source = (
+                    f"{stock.name} {row.date.year}년 {row.date.month}월 "
+                    f"저가 {min(lows):,.0f} ~ 고가 {max(highs):,.0f}원 "
+                    f"({row.date} 종가 {close:,.0f}원)"
+                )
+
+                def add(text: str, label: str, error: str) -> None:
+                    claims.append(TestClaim(
+                        claim_id=self._next_id("hp"), text=text, label=label,
+                        claim_type="PRICE", error_kind=error,
+                        code=stock.code, source_fact=source,
+                    ))
+
+                # 모호한 날짜 + 만원 단위 어림수. 실제 LLM 이 말하는 방식입니다.
+                unit = 10000 if close >= 50000 else 1000
+                rounded = round(close / unit) * unit
+                head = (
+                    f"{stock.name} 주가는 {row.date.year}년 "
+                    f"{row.date.month}월 {part}"
+                )
+                add(f"{head} {rounded:,.0f}원 수준이었다.", "SUPPORTED", "vague_date")
+
+                # 같은 모호한 날짜에 그 달 범위를 크게 벗어난 값.
+                far = round(max(highs) * 1.4 / unit) * unit
+                add(f"{head} {far:,.0f}원 수준이었다.", "CONTRADICTED", "vague_date_wrong")
+        return claims
+
+
 def summarize(claims: list[TestClaim]) -> dict[str, Any]:
     from collections import Counter
 

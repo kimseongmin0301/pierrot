@@ -30,16 +30,27 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="라벨된 테스트셋 생성")
     parser.add_argument("--target", type=int, default=300, help="목표 주장 수")
     parser.add_argument("--seed", type=int, default=20261118)
-    parser.add_argument("--out", type=Path, default=OUTPUT_PATH)
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--hard", action="store_true",
+                        help="어림수·다른 단위·모호한 날짜로 만든 어려운 셋")
     args = parser.parse_args()
 
     financials = FinancialSnapshot.load()
     prices = PriceSnapshot.load()
 
     builder = TestSetBuilder(seed=args.seed)
-    numeric = builder.numeric_claims(financials)
-    direction = builder.direction_claims(financials)
-    price = builder.price_claims(prices)
+    if args.hard:
+        numeric = builder.hard_numeric_claims(financials)
+        direction = []
+        price = builder.hard_price_claims(prices)
+    else:
+        numeric = builder.numeric_claims(financials)
+        direction = builder.direction_claims(financials)
+        price = builder.price_claims(prices)
+
+    out = args.out or (
+        OUTPUT_PATH.with_name("testset_hard.jsonl") if args.hard else OUTPUT_PATH
+    )
 
     print("=" * 88)
     print("테스트셋 생성")
@@ -75,14 +86,14 @@ def main() -> int:
 
     pool.sort(key=lambda claim: claim.claim_id)
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    with args.out.open("w", encoding="utf-8", newline="\n") as handle:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8", newline="\n") as handle:
         for claim in pool:
             handle.write(json.dumps(claim.to_dict(), ensure_ascii=False) + "\n")
 
     stats = summarize(pool)
     print()
-    print(f"저장 완료: {args.out} ({len(pool)}개)")
+    print(f"저장 완료: {out} ({len(pool)}개)")
     print(f"  라벨별: {stats['by_label']}")
     print(f"  유형별: {stats['by_type']}")
     print(f"  오류별: {stats['by_error']}")
