@@ -6,6 +6,10 @@
 프롬프트를 고치기 전에 기계가 셀 수 있는 기준이 필요합니다. 고치고 나서
 좋아졌는지 같은 기준으로 다시 재야 하기 때문입니다.
 
+6단계 전후 비교:
+    --claims evaluation/datasets/sample_claims_before_refine.jsonl   (다듬기 전)
+    --claims evaluation/datasets/sample_claims_after_refine.jsonl    (다듬기 후)
+
 실행 (API 비용 없음):
     .venv/Scripts/python.exe scripts/check_decontextualization.py
     .venv/Scripts/python.exe scripts/check_decontextualization.py --claims <경로>
