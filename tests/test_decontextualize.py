@@ -27,6 +27,7 @@ from pierrot.tools.price_claim import (
     PriceQuery,
 )
 from pierrot.tools.price_verify import (
+    MAX_LEVEL_SPREAD_RATIO,
     MAX_RATE_SPREAD_PP,
     Verdict,
     verify_price_claim,
@@ -251,3 +252,88 @@ def test_좁은_구간은_그대로_판정한다(wide_snapshot):
     end = DateRange(date(2024, 12, 20), date(2024, 12, 31), DatePrecision.RANGE, "2024년 12월 말")
     result = verify_price_claim(_rate_query(start, end, 25.6), wide_snapshot)
     assert result.verdict is Verdict.SUPPORTED
+
+
+# ---------------------------------------------------------------------------
+# 값 주장도 구간이 넓으면 판정하지 않습니다
+# ---------------------------------------------------------------------------
+
+
+def _level_query(window: DateRange, value: float) -> PriceQuery:
+    parsed = ParsedPriceClaim(
+        is_price_claim=True,
+        company="삼성전자",
+        assertion=PriceAssertion.LOW,
+        point_date_expr=window.raw,
+        start_date_expr="",
+        end_date_expr="",
+        direction=Direction.NONE,
+        value_low=value,
+        value_high=value,
+        note="",
+    )
+    return PriceQuery(
+        parsed=parsed,
+        stock=find_stock("삼성전자"),
+        window=window,
+        start_window=window,
+        end_window=window,
+        unresolved="",
+    )
+
+
+@pytest.fixture
+def quarter_snapshot():
+    """한 분기 동안 크게 움직인 종목. 구간이 길면 폭이 벌어집니다."""
+    # 값은 모두 호가 단위(5만~10만원 구간은 100원)에 맞춥니다.
+    # 어긋나면 "수정주가로 보정된 종목" 가드가 먼저 걸려 이 테스트가
+    # 보려는 것을 가립니다.
+    records = []
+    for day, low, high, close in [
+        (date(2024, 7, 1), 86_000.0, 88_800.0, 87_400.0),
+        (date(2024, 8, 5), 70_000.0, 74_000.0, 72_000.0),
+        (date(2024, 9, 30), 61_500.0, 63_000.0, 62_200.0),
+    ]:
+        records.append(
+            {
+                "code": "005930",
+                "date": day,
+                "open": high,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": 1000.0,
+                "change": 0.0,
+            }
+        )
+    return PriceSnapshot.from_records(records)
+
+
+def test_값_주장도_기간이_넓으면_판정하지_않는다(quarter_snapshot):
+    """API 연기 테스트에서 나온 오탐을 고정합니다.
+
+    "삼성전자 주가는 2024년 3분기 실적 발표 직후 71,800원까지 하락했다" 가
+    92일 구간으로 해석되어 저가 61,500 ~ 88,800원(44% 폭)이 나왔고,
+    주장 71,800원이 그 안에 들어가 SUPPORTED 로 통과했습니다.
+    그 정도로 넓은 구간은 그 사이 어떤 값이든 통과시킵니다.
+    """
+    window = DateRange(
+        date(2024, 7, 1), date(2024, 9, 30), DatePrecision.RANGE, "2024년 3분기"
+    )
+    result = verify_price_claim(_level_query(window, 71_800.0), quarter_snapshot)
+    assert result.verdict is Verdict.UNVERIFIABLE
+    assert "너무 넓어" in result.reason
+    assert result.observed_high / result.observed_low - 1 > MAX_LEVEL_SPREAD_RATIO
+
+
+def test_좁은_구간의_값_주장은_그대로_판정한다(quarter_snapshot):
+    """가드가 과하면 정상 주장까지 막습니다. 반대 방향 고정입니다."""
+    window = DateRange(
+        date(2024, 9, 29), date(2024, 9, 30), DatePrecision.RANGE, "2024년 9월 말"
+    )
+    assert verify_price_claim(
+        _level_query(window, 62_000.0), quarter_snapshot
+    ).verdict is Verdict.SUPPORTED
+    assert verify_price_claim(
+        _level_query(window, 90_000.0), quarter_snapshot
+    ).verdict is Verdict.CONTRADICTED

@@ -74,6 +74,10 @@ def price_tolerance_for(value: float) -> float:
 # 근거는 `_verify_change_rate` 안의 설명을 보십시오.
 MAX_RATE_SPREAD_PP = 25.0
 
+# 값 주장(종가·고가·저가)의 관측 구간이 이 비율을 넘으면 판정하지 않습니다.
+# 근거는 `_verify_level` 안의 설명을 보십시오.
+MAX_LEVEL_SPREAD_RATIO = 0.35
+
 
 def rate_tolerance_for(value: float) -> float:
     """등락률 주장 하나의 허용 오차(퍼센트포인트)."""
@@ -257,6 +261,34 @@ def _verify_level(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVerificati
         observed_low = min(row.level("low", prefer_raw=use_raw) for row in rows)
         observed_high = max(row.level("high", prefer_raw=use_raw) for row in rows)
         what = "고가" if assertion is PriceAssertion.HIGH else "저가"
+
+    # 관측 구간이 너무 넓으면 판정하지 않습니다.
+    #
+    # 기간이 길면 그 안의 최저~최고가 폭이 벌어져 **그 사이 아무 값이나
+    # 통과합니다.** 등락률 쪽에서 겪은 것과 같은 문제입니다.
+    #
+    # 실측 사례(API 연기 테스트):
+    #   "삼성전자 주가는 2024년 3분기 실적 발표 직후 71,800원까지 하락했다"
+    #   -> "3분기" 로 해석되어 92일 구간, 저가 61,500 ~ 88,800원 (44% 폭)
+    #   -> 주장 71,800원이 그 안에 들어가 SUPPORTED (오탐)
+    #
+    # 4단계 어려운 셋의 값 주장은 폭이 최대 23.6% 였습니다(구간이 열흘 안팎).
+    # 그래서 35% 를 상한으로 둡니다. 지표가 유지되는지는 재측정으로 확인합니다.
+    if observed_low > 0 and observed_high / observed_low - 1 > MAX_LEVEL_SPREAD_RATIO:
+        return PriceVerification(
+            Verdict.UNVERIFIABLE,
+            f"기간이 너무 넓어 {what}를 특정할 수 없습니다. "
+            f"{query.window.describe()} 동안 {_format(observed_low, '원')} ~ "
+            f"{_format(observed_high, '원')}({observed_high / observed_low - 1:.0%} 폭)라, "
+            f"그 사이 어떤 값이든 들어맞습니다.",
+            observed_low=observed_low,
+            observed_high=observed_high,
+            unit="원",
+            window=query.window,
+            precision=query.window.precision,
+            trading_days=len(rows),
+            price_basis="원주가" if use_raw else "수정주가",
+        )
 
     claimed_low = min(query.parsed.value_low, query.parsed.value_high)
     claimed_high = max(query.parsed.value_low, query.parsed.value_high)

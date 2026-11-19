@@ -1,4 +1,26 @@
 """최종 출력 조립. 원본 답변에 주장별 신뢰 표시를 붙입니다.
 
-아직 구현 전입니다 (로드맵 참고: docs/plan.md 6장).
+    from pierrot.reporter import build_report
+
+    report = build_report(answer, claims, results)
+    print(report.annotated_answer())
+    print(report.summary.to_dict())
 """
+
+from .report import (
+    MARKS,
+    ClaimReport,
+    Report,
+    Summary,
+    build_report,
+    summarize,
+)
+
+__all__ = [
+    "MARKS",
+    "ClaimReport",
+    "Report",
+    "Summary",
+    "build_report",
+    "summarize",
+]
