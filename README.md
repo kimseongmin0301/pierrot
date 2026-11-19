@@ -119,6 +119,18 @@ AI 답변  "삼성전자 3분기 영업이익은 6조 1,879억 원이고, 주가
 
 ## 직접 써 보기
 
+### 내 글을 넣어 보기
+
+```bash
+.venv/Scripts/python.exe scripts/verify_text.py my_analysis.txt
+.venv/Scripts/python.exe scripts/verify_text.py --text "삼성전자의 2024년 매출은 300조원이다"
+```
+
+넣기 전에 **대조 가능한 범위와 글에서 찾은 종목을 먼저 보여 주고 물어봅니다.**
+범위 밖의 글이면 호출 비용만 쓰고 전부 '확인 불가'가 나오기 때문입니다.
+
+### API 로 쓰기
+
 ```bash
 .venv/Scripts/python.exe scripts/run_api.py
 # 문서: http://127.0.0.1:8000/docs
@@ -352,6 +364,7 @@ ssh -N -L 11434:127.0.0.1:11434 ai-server
 ```bash
 scripts/generate_samples.py        # 검증 대상 답변 10건 생성 (무료)
 scripts/review_claims.py           # 문장 쪼개기 + 검토 출력
+scripts/verify_text.py             # 내 글을 넣어 검증
 scripts/run_verifier.py            # 에이전트를 전체 주장에 실행
 scripts/analyze_unverifiable.py    # 판정 못 한 건을 원인별로 분류 (무료)
 evaluation/run_eval.py             # 테스트셋으로 지표 산출
