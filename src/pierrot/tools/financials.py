@@ -116,7 +116,16 @@ class FinancialSnapshot:
                 f"재무 스냅샷이 없습니다: {path}\n"
                 "먼저 scripts/fetch_dart_snapshot.py 를 실행해 주십시오."
             )
-        return cls(pd.read_parquet(path))
+        frame = pd.read_parquet(path)
+
+        # 주요계정 밖에서 모은 수치(배당금, 지배주주순이익 등)를 합칩니다.
+        # 파일을 나눠 둔 이유: 주요계정 수집을 다시 돌려도 이쪽이 날아가지
+        # 않게 하기 위해서입니다. 없으면 그냥 넘어갑니다.
+        extra_path = path.with_name("dart_financials_extra.parquet")
+        if extra_path.exists():
+            extra = pd.read_parquet(extra_path)
+            frame = pd.concat([frame, extra], ignore_index=True)
+        return cls(frame)
 
     @classmethod
     def from_records(cls, records: list[dict]) -> "FinancialSnapshot":

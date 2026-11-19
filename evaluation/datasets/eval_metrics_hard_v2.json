@@ -1,0 +1,21 @@
+{
+  "tool": {
+    "total": 200,
+    "true_claims": 148,
+    "false_claims": 52,
+    "unverifiable_claims": 0,
+    "caught": 52,
+    "missed": 0,
+    "skipped_false": 0,
+    "false_alarm": 0,
+    "confirmed": 148,
+    "skipped_true": 0,
+    "correct_abstain": 0,
+    "wrong_judgement": 0,
+    "recall": 1.0,
+    "false_positive_rate": 0.0,
+    "precision": 1.0,
+    "coverage": 1.0,
+    "f1": 1.0
+  }
+}
