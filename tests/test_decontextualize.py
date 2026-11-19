@@ -15,6 +15,7 @@ from pierrot.extractor.decontextualize import (
     RewrittenClaim,
     RewrittenClaimList,
     decontextualize,
+    invented_company,
     missing_parts,
 )
 from pierrot.extractor.models import Claim, ClaimType
@@ -143,6 +144,12 @@ def test_번호가_어긋나면_통째로_버린다():
     assert result == claims
 
 
+ANSWER_WITH_COMPANY = (
+    "SK하이닉스의 2024년 영업이익은 23조 4,673억 원입니다. "
+    "HBM4 개발 성공을 통해 고부가 제품 비중을 확대했습니다."
+)
+
+
 def test_손댈_주장만_보내고_나머지는_그대로_둔다():
     """다 갖춘 주장은 LLM 에 보내지 않습니다. 보내면 멀쩡한 것을 망칠 수 있습니다."""
     good = claim("삼성전자의 2024년 3분기 영업이익은 9조원이다", "c1")
@@ -156,11 +163,94 @@ def test_손댈_주장만_보내고_나머지는_그대로_둔다():
             ]
         )
     )
-    result, problem = decontextualize("답변", [good, bad], model=model, names=NAMES)
-    assert problem == ""
+    result, note = decontextualize(
+        ANSWER_WITH_COMPANY, [good, bad], model=model, names=NAMES
+    )
+    assert note == ""
     assert result[0].text == good.text          # 손대지 않음
     assert result[1].text.startswith("SK하이닉스")  # 다시 쓰임
     assert result[1].claim_id == "c2"           # 짝이 어긋나지 않음
+
+
+# ---------------------------------------------------------------------------
+# 없는 회사를 지어내는 것을 막습니다
+# ---------------------------------------------------------------------------
+
+
+def test_원문에_없는_회사를_넣으면_되돌린다():
+    """실측에서 나온 오탐을 고정합니다.
+
+    회사 이름이 한 번도 안 나오는 글을 넣었는데 다듬기 단계가
+    "SK하이닉스" 를 지어냈고, 그 회사의 수치로 조회해 모순 판정까지
+    났습니다. 프롬프트에 "지어내지 마십시오" 라고 적어 두었지만
+    지켜지지 않았습니다. 그래서 코드로 검사합니다.
+    """
+    answer = "펀더멘탈 분석 결과, 2023년부터 2025년까지 실적 성장세가 이어지고 있습니다."
+    target = claim("2023년부터 2025년까지 실적 성장세가 이어지고 있다", "c1")
+    model = FakeModel(
+        RewrittenClaimList(
+            claims=[
+                RewrittenClaim(
+                    index=1,
+                    text="SK하이닉스의 2023년부터 2025년까지 실적 성장세가 이어지고 있다",
+                    filled_from="지어냄",
+                )
+            ]
+        )
+    )
+    result, note = decontextualize(answer, [target], model=model, names=NAMES)
+    assert result[0].text == target.text        # 원래대로 되돌림
+    assert "SK하이닉스" in note
+
+
+def test_원문에_있는_회사는_그대로_넣는다():
+    """가드가 과하면 정상 동작까지 막습니다. 반대 방향 고정입니다."""
+    target = claim("HBM4 개발이 성공했다", "c1")
+    model = FakeModel(
+        RewrittenClaimList(
+            claims=[
+                RewrittenClaim(
+                    index=1, text="SK하이닉스는 2024년에 HBM4 개발에 성공했다", filled_from="답변"
+                )
+            ]
+        )
+    )
+    result, note = decontextualize(
+        ANSWER_WITH_COMPANY, [target], model=model, names=NAMES
+    )
+    assert result[0].text.startswith("SK하이닉스")
+    assert note == ""
+
+
+def test_한_문장이_되돌려져도_나머지는_살린다():
+    """한 문장 때문에 멀쩡하게 다듬어진 나머지를 잃으면 안 됩니다."""
+    a = claim("HBM4 개발이 성공했다", "c1")
+    b = claim("영업이익이 늘었다", "c2")
+    model = FakeModel(
+        RewrittenClaimList(
+            claims=[
+                RewrittenClaim(index=1, text="SK하이닉스는 2024년에 HBM4 개발에 성공했다", filled_from="답변"),
+                RewrittenClaim(index=2, text="카카오의 2024년 영업이익이 늘었다", filled_from="지어냄"),
+            ]
+        )
+    )
+    result, note = decontextualize(ANSWER_WITH_COMPANY, [a, b], model=model, names=NAMES)
+    assert result[0].text.startswith("SK하이닉스")  # 살아남음
+    assert result[1].text == b.text                 # 되돌려짐
+    assert "카카오" in note
+
+
+@pytest.mark.parametrize(
+    "original,rewritten,answer,expected",
+    [
+        ("실적이 늘었다", "SK하이닉스의 실적이 늘었다", "분석 결과입니다", "SK하이닉스"),
+        ("실적이 늘었다", "SK하이닉스의 실적이 늘었다", "SK하이닉스 분석", ""),
+        ("SK하이닉스 실적", "SK하이닉스의 실적이 늘었다", "분석 결과입니다", ""),
+        ("실적이 늘었다", "2024년 실적이 늘었다", "분석 결과입니다", ""),
+    ],
+)
+def test_지어낸_회사만_골라낸다(original, rewritten, answer, expected):
+    assert invented_company(original, rewritten, answer, NAMES) == expected
 
 
 def test_호출이_실패해도_주장을_잃지_않는다():

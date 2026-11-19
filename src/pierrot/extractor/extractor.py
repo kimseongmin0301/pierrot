@@ -265,14 +265,18 @@ def extract_claims(
 
     from .decontextualize import decontextualize
 
-    refined, problem = decontextualize(
+    refined, note = decontextualize(
         answer, result.claims, model=decontextualizer, settings=settings
     )
-    if problem:
-        # 다듬기는 선택 사항이고 누락은 치명적입니다. 의심스러우면
-        # 아무것도 바꾸지 않습니다. 사유는 결과에 남깁니다.
-        return result.model_copy(update={"refine_note": problem})
-    return result.model_copy(update={"claims": refined, "refined": True})
+    # 돌려받은 목록을 **항상** 씁니다.
+    #
+    # 문제가 생긴 문장은 `decontextualize` 안에서 이미 원래대로 되돌려 놓습니다
+    # (개수가 어긋나면 전체를, 없는 회사를 지어냈으면 그 문장만).
+    # 여기서 note 가 있다고 전체를 버리면, 한 문장 때문에 멀쩡하게 다듬어진
+    # 나머지까지 잃습니다. note 는 무슨 일이 있었는지 알리는 용도입니다.
+    return result.model_copy(
+        update={"claims": refined, "refined": True, "refine_note": note}
+    )
 
 
 def assemble_result(

@@ -32,6 +32,17 @@
 --------
 이 단계는 주장을 **다시 쓰기만** 합니다. 개수가 달라지면 결과를 통째로 버리고
 원래 주장을 씁니다. "지우지 마십시오"라고 부탁하는 대신 구조로 막습니다.
+
+**없는 회사를 지어내는 것도 코드로 막습니다.** 프롬프트에 "답변에 없는 정보를
+만들어 넣지 마십시오"라고 적어 두었지만 지켜지지 않았습니다. 실측 사례입니다.
+
+    원문: "펀더멘탈 분석 결과, 최근 2023년부터 2025년까지의 실적 성장세가
+           이어지고 있으며 ..."  (회사 이름이 한 번도 안 나옴)
+    결과: "**SK하이닉스**의 2023년부터 2025년까지의 실적 성장세가 이어지고 있다"
+          -> 지어낸 회사로 조회해 모순 판정까지 났습니다. 오탐입니다.
+
+그래서 다시 쓴 문장에 들어간 회사 이름이 **원문에 실제로 있는지** 대조하고,
+없으면 그 문장만 원래대로 되돌립니다. 부탁이 아니라 검사입니다.
 """
 
 from __future__ import annotations
@@ -51,7 +62,7 @@ from .quality import (
 )
 from ..llm import get_openai_chat
 
-DECONTEXT_VERSION = "decontext-v3"
+DECONTEXT_VERSION = "decontext-v4"
 
 
 class RewrittenClaim(BaseModel):
@@ -163,6 +174,21 @@ def missing_parts(claim: Claim, names: tuple[str, ...]) -> list[str]:
     return parts
 
 
+def invented_company(original: str, rewritten: str, answer: str, names: tuple[str, ...]) -> str:
+    """다시 쓴 문장이 **원문에 없는 회사**를 새로 넣었으면 그 이름을 돌려줍니다.
+
+    프롬프트로 "지어내지 마십시오"라고 해도 지켜지지 않습니다.
+    지어낸 회사로 조회하면 전혀 다른 회사의 수치와 대조하게 되어
+    **판정 자체가 거짓**이 됩니다. 누락보다 나쁩니다.
+    """
+    for name in names:
+        if not name or name in original:
+            continue
+        if name in rewritten and name not in answer:
+            return name
+    return ""
+
+
 def build_decontextualizer(
     *, settings: Settings | None = None, temperature: float = 0.0
 ) -> Any:
@@ -200,9 +226,16 @@ def decontextualize(
     """빠진 맥락이 있는 주장만 골라 다듬습니다.
 
     Returns:
-        (다듬은 주장 목록, 문제가 있었으면 그 사유). 사유가 비어 있지 않으면
-        **원래 주장을 그대로** 돌려줍니다. 다듬기는 선택 사항이고 누락은
-        치명적이므로, 의심스러우면 아무것도 바꾸지 않는 쪽을 택합니다.
+        (다듬은 주장 목록, 무슨 일이 있었는지 적은 쪽지).
+
+        **돌려주는 목록은 언제나 바로 쓸 수 있습니다.** 문제가 생긴 것은
+        안에서 이미 원래대로 되돌려 놓습니다.
+
+          - 개수나 번호가 어긋남 -> 전체를 원래대로
+          - 원문에 없는 회사를 지어냄 -> 그 문장만 원래대로
+
+        쪽지는 무엇이 되돌려졌는지 알리는 용도이지, 결과를 버리라는 신호가
+        아닙니다. 한 문장 때문에 멀쩡한 나머지를 잃으면 안 됩니다.
     """
     if not claims:
         return claims, ""
@@ -250,8 +283,22 @@ def decontextualize(
         return claims, "번호가 1..N 과 맞지 않습니다"
 
     rewritten = list(claims)
+    invented: list[str] = []
     for number, (position, claim, _) in enumerate(targets, 1):
         text = (by_number[number].text or "").strip()
-        if text and text != claim.text:
-            rewritten[position] = claim.model_copy(update={"text": text})
-    return rewritten, ""
+        if not text or text == claim.text:
+            continue
+
+        # 원문에 없는 회사를 새로 넣었으면 그 문장은 되돌립니다.
+        # 지어낸 회사로 조회하면 전혀 다른 회사의 수치와 대조하게 됩니다.
+        made_up = invented_company(claim.text, text, answer, names)
+        if made_up:
+            invented.append(f"{made_up}({claim.claim_id})")
+            continue
+
+        rewritten[position] = claim.model_copy(update={"text": text})
+
+    note = ""
+    if invented:
+        note = "원문에 없는 회사를 넣으려 해 되돌렸습니다: " + ", ".join(invented)
+    return rewritten, note
