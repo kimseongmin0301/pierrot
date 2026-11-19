@@ -152,6 +152,34 @@ def verify_price_claim(
     assert query.stock is not None and query.window is not None
     code = query.stock.code
 
+    # 비교할 숫자가 없는 주장을 거릅니다.
+    #
+    # 파서는 주장에 숫자가 없으면 value_low / value_high 를 0 으로 채웁니다.
+    # "없음"을 나타내는 별도 필드가 없기 때문입니다. 이걸 그대로 비교하면
+    # 주장 구간이 [0, 0] 이 되어 실제 시세와 절대 겹치지 않고, 결과적으로
+    # **숫자를 말하지도 않은 주장이 모순으로 판정됩니다.**
+    #
+    # 실제로 발생했습니다.
+    #   "셀트리온 주가는 2024년 1월 8일 장마감 기준으로 전장 최저점을 찍은 후
+    #    회복세를 보였다"
+    #   -> LOW 주장, 주장값 0원, 실제 저가 204,500원 -> 모순 (오탐)
+    #
+    # 3단계 에이전트가 이 주장을 NARRATIVE 에서 PRICE 로 돌리면서 드러났습니다.
+    # 그 전에는 이 주장이 주가 도구에 들어온 적이 없어 가려져 있었습니다.
+    #
+    # 0% 등락 주장("보합")도 같이 걸립니다. 하지만 그런 주장은 매우 드물고,
+    # 거르면 적발을 하나 놓칠 뿐이지만 거르지 않으면 없던 오탐이 생깁니다.
+    # 이 프로젝트는 오탐을 더 비싸게 봅니다.
+    if query.parsed.value_low == 0 and query.parsed.value_high == 0:
+        unit = "등락률" if query.parsed.assertion is PriceAssertion.CHANGE_RATE else "가격"
+        return PriceVerification(
+            Verdict.UNVERIFIABLE,
+            f"주장에 비교할 {unit} 수치가 없습니다. 값을 말하지 않은 주장은 "
+            f"주가 조회로 참·거짓을 가릴 수 없습니다.",
+            window=query.window,
+            precision=query.window.precision,
+        )
+
     is_level = query.parsed.assertion in (
         PriceAssertion.CLOSE,
         PriceAssertion.HIGH,

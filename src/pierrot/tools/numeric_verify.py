@@ -273,6 +273,24 @@ def _verify_growth(
         )
 
     magnitude = abs(query.parsed.growth_percent)
+
+    # 비교할 수치가 없는 주장을 거릅니다.
+    #
+    # 파서는 증감률 수치를 못 찾으면 0 을 돌려줍니다. "없음"을 나타내는 필드가
+    # 없기 때문입니다. 그대로 비교하면 "매출이 증가했다"처럼 **크기를 말하지 않은
+    # 주장이 0% 주장으로 둔갑해** 실제 -29.9% 와 어긋나 모순 판정을 받습니다.
+    # 방향만 말한 주장은 DIRECTION 으로 가야 하고, GROWTH 로 왔는데 수치가 0 이면
+    # 파싱이 어긋난 것입니다.
+    #
+    # 같은 모양의 버그를 주가 쪽에서 실제로 겪었습니다(price_verify.py 참고).
+    # 거기서는 "주장 0원" 과 실제 204,500원을 비교해 오탐이 났습니다.
+    if magnitude == 0:
+        return NumericVerification(
+            Verdict.UNVERIFIABLE,
+            "주장에 비교할 증감률 수치가 없습니다. 크기를 말하지 않은 주장은 "
+            "증감률 비교로 참·거짓을 가릴 수 없습니다.",
+        )
+
     claimed = -magnitude if query.parsed.direction is Direction.DOWN else magnitude
     tolerance = tolerance_for(
         claimed,
