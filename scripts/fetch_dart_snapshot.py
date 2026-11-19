@@ -39,7 +39,17 @@ from pierrot.tools.financials import (  # noqa: E402
 )
 from pierrot.tools.universe import UNIVERSE  # noqa: E402
 
-DEFAULT_FROM_YEAR = 2023
+# 2022 부터 받습니다.
+#
+# 처음에는 2023 부터 받았는데, 그러면 **2023년 증감 주장을 판정할 수 없습니다.**
+# 증감은 전년 수치가 있어야 계산되기 때문입니다. 실제로 사용자가 넣은 글에서
+# "2023년에는 매출이 증가하였으며, 영업이익과 순이익 또한 상승하였습니다" 가
+# 전부 확인 불가로 나왔습니다. 삼성전자 2023년 영업이익은 6.6조로 전년(43.4조)
+# 대비 크게 줄어든 해여서, 2022년만 있었으면 모순으로 잡혔을 주장입니다.
+#
+# 스냅샷의 첫 해는 **증감을 계산하는 기준으로만** 쓰이고 그 해 자체의 증감은
+# 판정하지 못합니다. 그래서 보고 싶은 기간보다 한 해 앞서 받아야 합니다.
+DEFAULT_FROM_YEAR = 2022
 CORP_MAP_FILENAME = "dart_corp_codes.parquet"
 
 

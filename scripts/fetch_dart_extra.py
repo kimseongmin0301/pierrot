@@ -32,7 +32,8 @@ from pierrot.tools.universe import UNIVERSE  # noqa: E402
 CORP_PATH = PROJECT_ROOT / "data" / "snapshots" / "dart_corp_codes.parquet"
 OUTPUT_PATH = PROJECT_ROOT / "data" / "snapshots" / "dart_financials_extra.parquet"
 
-YEARS = (2023, 2024, 2025)
+# 재무 스냅샷과 같은 이유로 2022 부터 받습니다(증감 계산의 기준 해).
+YEARS = (2022, 2023, 2024, 2025)
 # 배당은 사업보고서(연간)에만 있습니다. 분기보고서에는 없습니다.
 REPORT_CODE = "11011"
 
