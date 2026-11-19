@@ -218,8 +218,19 @@ def extract_claims(
     extractor: Any | None = None,
     settings: Settings | None = None,
     model_name: str | None = None,
+    decontextualizer: Any | None = None,
+    refine: bool = True,
 ) -> ExtractionResult:
     """답변 텍스트 하나를 주장 목록으로 분해합니다.
+
+    두 단계로 나뉩니다.
+
+    1. 분해 — 답변에서 검증 가능한 진술을 빠짐없이 뽑습니다(`prompts.py`).
+    2. 다듬기 — 각 주장에 회사와 시점을 채웁니다(`decontextualize.py`).
+
+    왜 나누는가: 한 프롬프트에 "빠짐없이 뽑아라"와 "엄밀하게 다듬어라"를 같이
+    넣었더니 추출이 보수적으로 바뀌어 서술 주장을 놓쳤습니다
+    (커버리지 83.2% -> 71.7%). 자세한 측정은 `prompts.py` 의 버전 이력에 있습니다.
 
     Args:
         answer: 분해할 답변 텍스트.
@@ -227,6 +238,8 @@ def extract_claims(
             테스트에서는 API를 호출하지 않는 가짜 객체를 넣습니다.
         settings: 설정 객체. 생략하면 기본 설정을 씁니다.
         model_name: 결과에 기록할 모델 이름. 생략하면 설정에서 가져옵니다.
+        decontextualizer: 다듬기 체인. 생략하면 설정대로 새로 만듭니다.
+        refine: 다듬기 단계를 돌릴지. 끄면 분해 결과를 그대로 돌려줍니다.
     """
     settings = settings or get_settings()
     if model_name is None:
@@ -246,7 +259,20 @@ def extract_claims(
             HumanMessage(content=USER_PROMPT_TEMPLATE.format(answer=answer)),
         ]
     )
-    return assemble_result(answer, raw, model_name=model_name)
+    result = assemble_result(answer, raw, model_name=model_name)
+    if not refine or not result.claims:
+        return result
+
+    from .decontextualize import decontextualize
+
+    refined, problem = decontextualize(
+        answer, result.claims, model=decontextualizer, settings=settings
+    )
+    if problem:
+        # 다듬기는 선택 사항이고 누락은 치명적입니다. 의심스러우면
+        # 아무것도 바꾸지 않습니다. 사유는 결과에 남깁니다.
+        return result.model_copy(update={"refine_note": problem})
+    return result.model_copy(update={"claims": refined, "refined": True})
 
 
 def assemble_result(

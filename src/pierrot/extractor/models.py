@@ -147,6 +147,12 @@ class ExtractionResult(BaseModel):
     model: str
 
     prompt_version: str = ""
+
+    refined: bool = False
+    """탈맥락화 2단계를 거쳤는지."""
+
+    refine_note: str = ""
+    """2단계를 건너뛰었다면 그 사유. 비어 있으면 문제가 없었습니다."""
     """어떤 버전의 프롬프트로 분해했는지.
 
     프롬프트를 고치면 결과가 달라지므로, 지표를 비교하려면 어떤 프롬프트로 나온

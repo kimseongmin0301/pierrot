@@ -70,6 +70,11 @@ def price_tolerance_for(value: float) -> float:
     return tolerance_for(value)
 
 
+# 등락률 관측 구간이 이보다 넓으면 판정하지 않습니다(단위: %p).
+# 근거는 `_verify_change_rate` 안의 설명을 보십시오.
+MAX_RATE_SPREAD_PP = 25.0
+
+
 def rate_tolerance_for(value: float) -> float:
     """등락률 주장 하나의 허용 오차(퍼센트포인트)."""
     return tolerance_for(
@@ -329,6 +334,36 @@ def _verify_change_rate(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVeri
     # 구간 안에서 나올 수 있는 등락률의 최소·최대를 구합니다.
     observed_low = (end_low / start_high - 1) * 100
     observed_high = (end_high / start_low - 1) * 100
+
+    # 관측 구간이 너무 넓으면 판정하지 않습니다.
+    #
+    # 시작·끝 구간이 넓으면 "그 사이 어느 날에서 어느 날로" 조합이 많아져
+    # 등락률 범위가 통째로 벌어집니다. 그러면 **아무 주장이나 통과합니다.**
+    #
+    # 실측 사례:
+    #   "LG에너지솔루션의 주가는 2024년 전년 동기간 동안 약 13% 하락했다"
+    #   -> 2023년 전체 -> 2024년 전체로 해석되어 실제 등락률 -47.6% ~ +15.6%
+    #   -> 주장 -13% 가 그 안에 들어가 SUPPORTED (오탐)
+    #
+    # 정상 주장의 폭은 실측에서 2.2 ~ 12.8%p 였습니다(구간이 열흘 안팎).
+    # 그래서 25%p 를 넘으면 구간을 특정하지 못한 것으로 봅니다.
+    # 테스트셋에는 등락률 주장이 없어 4단계 지표에 영향을 주지 않습니다.
+    spread = observed_high - observed_low
+    if spread > MAX_RATE_SPREAD_PP:
+        return PriceVerification(
+            Verdict.UNVERIFIABLE,
+            f"기간이 너무 넓어 등락률을 특정할 수 없습니다. "
+            f"{query.start_window.describe()} -> {query.end_window.describe()} 조합에서 "
+            f"나올 수 있는 등락률이 {_format(observed_low, '%')} ~ "
+            f"{_format(observed_high, '%')} ({spread:.1f}%p 폭)이라, "
+            f"어떤 주장이든 들어맞습니다.",
+            observed_low=observed_low,
+            observed_high=observed_high,
+            unit="%",
+            window=query.window,
+            precision=query.window.precision,
+            trading_days=len(start_rows) + len(end_rows),
+        )
 
     claimed_low, claimed_high = _claimed_rate_interval(query)
     tolerance_pp = max(
