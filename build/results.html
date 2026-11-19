@@ -1,0 +1,580 @@
+<title>PIERROT 검증 성능 측정</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Nanum+Myeongjo:wght@400;700&display=swap">
+
+<style>
+:root {
+  --ground: #f5f6f9;
+  --surface: #ffffff;
+  --surface-sunk: #edeff4;
+  --ink: #15171d;
+  --ink-soft: #565d6e;
+  --ink-faint: #858b9a;
+  --line: #e1e4ec;
+  --line-strong: #c8cdda;
+  --accent: #2f4b8f;
+  --accent-soft: #e8ecf7;
+  --good: #0d7a68;
+  --warn: #96600f;
+  --flag: #b2331d;
+  --shadow: 0 1px 2px rgba(21,23,29,.05), 0 10px 28px -20px rgba(21,23,29,.3);
+  --sans: "IBM Plex Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
+  --serif: "Nanum Myeongjo", "Batang", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, "Consolas", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0e1015; --surface: #161920; --surface-sunk: #10131a;
+    --ink: #e5e8ef; --ink-soft: #969dae; --ink-faint: #737a8a;
+    --line: #262a34; --line-strong: #3a414f; --accent: #91a7e2;
+    --accent-soft: #1b2133;
+    --good: #4ec8af; --warn: #d6a243; --flag: #e57058;
+    --shadow: 0 1px 2px rgba(0,0,0,.45), 0 10px 28px -20px rgba(0,0,0,.9);
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #0e1015; --surface: #161920; --surface-sunk: #10131a;
+  --ink: #e5e8ef; --ink-soft: #969dae; --ink-faint: #737a8a;
+  --line: #262a34; --line-strong: #3a414f; --accent: #91a7e2;
+  --accent-soft: #1b2133;
+  --good: #4ec8af; --warn: #d6a243; --flag: #e57058;
+  --shadow: 0 1px 2px rgba(0,0,0,.45), 0 10px 28px -20px rgba(0,0,0,.9);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0; background: var(--ground); color: var(--ink);
+  font-family: var(--sans); font-size: 15px; line-height: 1.68;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell { max-width: 960px; margin: 0 auto; padding: 48px 24px 100px;
+  display: flex; flex-direction: column; gap: 34px; }
+
+.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .15em;
+  text-transform: uppercase; color: var(--ink-faint); }
+
+h1 { margin: 0; font-size: clamp(28px, 4.4vw, 40px); font-weight: 700;
+  letter-spacing: -.025em; text-wrap: balance; line-height: 1.22; }
+
+h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.012em; }
+h3 { margin: 14px 0 0; font-size: 14.5px; font-weight: 600; color: var(--ink); }
+
+p { margin: 0; max-width: 72ch; }
+.masthead { display: flex; flex-direction: column; gap: 12px; }
+.lede { color: var(--ink-soft); font-size: 16px; max-width: 68ch; }
+
+.meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 4px;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-faint); }
+.meta b { color: var(--ink-soft); font-weight: 500; }
+
+section.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 24px 26px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 14px;
+}
+section.card > h2 + p { margin-top: -2px; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px; }
+.tile { background: var(--surface-sunk); border: 1px solid var(--line);
+  border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 1px; }
+.tile .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-faint); }
+.tile .v { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums;
+  letter-spacing: -.025em; line-height: 1.3; }
+.tile .s { font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
+
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 480px;
+  font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--line);
+  font-size: 13.5px; }
+th:first-child, td:first-child { text-align: left; }
+thead th { font-family: var(--mono); font-size: 10.5px; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--ink-faint); font-weight: 500;
+  vertical-align: bottom; }
+tbody tr:last-child td { border-bottom: none; }
+tr.pick td { background: var(--accent-soft); font-weight: 600; }
+.good { color: var(--good); font-weight: 600; }
+.bad { color: var(--flag); font-weight: 600; }
+.warn { color: var(--warn); font-weight: 600; }
+.dim { color: var(--ink-faint); }
+
+pre { margin: 0; background: var(--surface-sunk); border: 1px solid var(--line);
+  border-radius: 8px; padding: 13px 15px; overflow-x: auto;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.72; color: var(--ink-soft);
+  white-space: pre; }
+pre b { color: var(--ink); font-weight: 600; }
+pre .f { color: var(--flag); }
+pre .g { color: var(--good); }
+code { font-family: var(--mono); font-size: .9em; background: var(--surface-sunk);
+  padding: 1px 5px; border-radius: 4px; border: 1px solid var(--line); }
+
+ol, ul { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 9px; }
+li { color: var(--ink-soft); max-width: 74ch; }
+li b, p b { color: var(--ink); font-weight: 600; }
+
+.note { font-family: var(--serif); font-size: 15.5px; color: var(--ink-soft);
+  border-left: 3px solid var(--line-strong); padding: 3px 0 3px 16px; max-width: 68ch;
+  line-height: 1.7; }
+.note b { color: var(--ink); }
+
+.fix { border-left: 3px solid var(--flag); padding: 2px 0 2px 16px;
+  display: flex; flex-direction: column; gap: 5px; }
+.fix .t { font-weight: 600; color: var(--ink); }
+.fix div:last-child { color: var(--ink-soft); max-width: 74ch; }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+
+.mermaid { background: var(--surface-sunk); border: 1px solid var(--line);
+  border-radius: 8px; padding: 16px; overflow-x: auto; }
+
+footer { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+  text-align: center; line-height: 1.8; }
+</style>
+
+<div class="shell">
+
+  <header class="masthead">
+    <div class="eyebrow">PIERROT · LLM 환각 검증 시스템</div>
+    <h1>검증기를 만들고, 그 검증기의 성능을 쟀다</h1>
+    <p class="lede">
+      LLM 답변을 주장 단위로 쪼개고, 공시·주가 데이터로 하나씩 대조해
+      주장별로 참·거짓을 붙입니다. 이 페이지는 <b>그 검증기가 얼마나 맞히는지</b>를
+      정답 라벨로 측정한 기록입니다. 만든 과정보다 <b>측정이 무엇을 드러냈는지</b>에
+      무게를 뒀습니다.
+    </p>
+    <div class="meta">
+      <span>기준일 <b>2026-11-19</b></span>
+      <span>테스트셋 <b>500건</b></span>
+      <span>테스트 <b>417개 통과</b></span>
+      <span>누적 API 비용 <b>$0.52</b> / 상한 $5.00</span>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="tiles">
+      <div class="tile"><div class="k">도구 기반 재현율</div><div class="v good">100%</div>
+        <div class="s">거짓 주장 52건을 전부 적발<br>오탐 0건</div></div>
+      <div class="tile"><div class="k">실제 답변 커버리지</div><div class="v">53.9%</div>
+        <div class="s">전망 주장 제외 기준<br>전체 기준 43.6%</div></div>
+      <div class="tile"><div class="k">NLI 베이스라인</div><div class="v bad">15.4%</div>
+        <div class="s">어려운 셋 재현율<br>오탐률 45.3%</div></div>
+      <div class="tile"><div class="k">처리 속도</div><div class="v">0.58<span style="font-size:15px">초</span></div>
+        <div class="s">주장 1건당<br>캐시 적중 시</div></div>
+    </div>
+    <p class="note">
+      두 숫자를 나란히 둔 이유가 이 프로젝트의 요지입니다.
+      <b>100%는 "데이터가 있는 주장을 정확히 판정한다"</b>는 뜻이고,
+      <b>53.9%는 "실제 답변의 절반쯤만 그 조건에 해당한다"</b>는 뜻입니다.
+      하나만 내면 둘 중 하나를 숨기게 됩니다.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>동작 흐름</h2>
+    <p>
+      답변이 들어오면 주장으로 쪼개고, 주장마다 어느 도구로 보낼지 정한 뒤,
+      공시·주가 데이터와 대조합니다. <b>라우팅은 LLM 이 아니라 규칙</b>입니다.
+      세 갈래 분류에 호출 비용을 치를 이유가 없고, 규칙은 테스트로 고정할 수 있기 때문입니다.
+    </p>
+    <pre class="mermaid">
+flowchart LR
+  A["답변"] --> B["주장 분해<br/>gpt-4o-mini"]
+  B --> C["탈맥락화<br/>회사·시점 채우기"]
+  C --> D{"라우팅<br/>규칙 기반"}
+  D -->|PRICE| E["주가 스냅샷<br/>조회·계산"]
+  D -->|NUMERIC| F["DART 재무<br/>대조"]
+  D -->|SEGMENT| G["부문별 매출 표"]
+  D -->|NARRATIVE| H["검색 + NLI"]
+  D -->|FORECAST| I["검증 대상 아님<br/>사유 기록"]
+  F -.계정 없음.-> G
+  E --> J["판정 + 근거"]
+  F --> J
+  G --> J
+  H --> J
+  I --> J
+    </pre>
+    <p class="dim">
+      LangGraph 상태 머신으로 구현했습니다. 경로 선택 사유와 시도 기록이 결과에 남아,
+      "왜 이 주장이 이 도구로 갔는지"를 나중에 추적할 수 있습니다.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>측정 1 — 정답 라벨 500건</h2>
+    <p>
+      정답 라벨을 사람이 붙이지 않고 <b>검증된 스냅샷에서 주장을 생성</b>했습니다.
+      DART·거래소 값이라 근거가 확실하고, 값을 일부러 틀리게 바꾸면 반드시 거짓입니다.
+      라벨이 생성 규칙에서 나오므로 의심할 여지가 없습니다.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th rowspan="2">방법</th>
+          <th colspan="3">쉬운 셋 (300건)</th>
+          <th colspan="3">어려운 셋 (200건)</th>
+        </tr><tr>
+          <th>재현율</th><th>오탐률</th><th>커버리지</th>
+          <th>재현율</th><th>오탐률</th><th>커버리지</th>
+        </tr></thead>
+        <tbody>
+          <tr class="pick"><td>도구 기반</td>
+            <td class="good">100%</td><td class="good">0%</td><td>100%</td>
+            <td class="good">100%</td><td class="good">0%</td><td>100%</td></tr>
+          <tr><td>NLI 베이스라인</td>
+            <td>61.0%</td><td class="bad">34.0%</td><td>60.0%</td>
+            <td class="bad">15.4%</td><td class="bad">45.3%</td><td>66.0%</td></tr>
+          <tr><td>LLM-as-judge</td>
+            <td>53.0%</td><td>6.0%</td><td>51.5%</td>
+            <td>46.2%</td><td class="bad">31.1%</td><td>67.5%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      쉬운 셋은 스냅샷 값을 그대로 옮긴 주장, 어려운 셋은 실제 LLM 이 말하는 방식
+      (어림수, 억 단위, 소수 표기, 모호한 날짜, 기준 미표기)으로 만든 주장입니다.
+      <b>어려운 셋에서 격차가 벌어집니다.</b>
+    </p>
+    <p class="note">
+      커버리지를 함께 내는 이유: LLM-as-judge 는 쉬운 셋에서 오탐률 6.0% 로
+      가장 좋아 보이지만, 그것은 판정이 필요한 주장의 절반(커버리지 51.5%)을
+      보류한 결과입니다. <b>전부 보류하는 검증기는 오탐률이 0% 가 됩니다.</b>
+    </p>
+
+    <h3>이 100%를 어떻게 읽어야 하는가</h3>
+    <p>
+      테스트셋을 스냅샷에서 생성했으므로 <b>도구가 데이터를 반드시 보유한 조건</b>입니다.
+      어려운 셋은 <i>표현</i>을 어렵게 만들었을 뿐 <i>데이터 가용성</i>은 보장했습니다.
+      그래서 실제 답변에 대한 성능은 커버리지로 따로 쟀습니다. 다음 절입니다.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>측정 2 — 실제 LLM 답변 94건</h2>
+    <p>
+      로컬 <code>gemma3:4b</code> 가 만든 금융 답변 10건을 주장 94개로 쪼개
+      에이전트에 통째로 넣었습니다. 테스트셋과 달리 <b>데이터가 있다는 보장이 없습니다.</b>
+    </p>
+    <div class="tiles">
+      <div class="tile"><div class="k">모순으로 적발</div><div class="v bad">41</div>
+        <div class="s">근거와 어긋난 주장</div></div>
+      <div class="tile"><div class="k">계산으로 대조</div><div class="v">39</div>
+        <div class="s">수치를 직접 비교<br>나머지 2건은 NLI 추정</div></div>
+      <div class="tile"><div class="k">확인 불가</div><div class="v">53</div>
+        <div class="s">사유를 전부 기록</div></div>
+      <div class="tile"><div class="k">근거 있음</div><div class="v">0</div>
+        <div class="s">맞는 수치가 하나도 없었음</div></div>
+    </div>
+    <p>
+      <b>근거 있음이 0건입니다.</b> <code>gemma3:4b</code> 가 말한 수치 중 실제와 맞는 것이
+      하나도 없었습니다. 작은 모델이 금융 수치를 얼마나 지어내는지 보여 줍니다.
+    </p>
+    <pre>삼성전자 2024년 3분기 영업이익   주장 6조 1,879억  vs  실제 <b>9조 1,833억</b>   <span class="f">모순</span>
+LG엔솔   2024년 1분기 영업이익    주장 <b>+28%</b>        vs  실제 <b>-75.2%</b>      <span class="f">모순</span>
+현대차   2023년 배당금 지급액     주장 4조 6,000억  vs  실제 <b>2조 9,986억</b>   <span class="f">모순</span>
+KB금융   2024년 지배주주순이익    주장 1조원        vs  실제 <b>5조 782억</b>     <span class="f">모순</span>
+NAVER   2024년 1분기 광고 부문   주장 5조 7,839억  vs  <b>전사 1분기 2.53조</b>  <span class="f">모순</span></pre>
+
+    <h3>확인 불가 53건을 원인별로 갈랐습니다</h3>
+    <p>
+      "확인 불가 53건"은 그 자체로 아무것도 알려주지 않습니다.
+      데이터가 없어서인지, 주장이 불완전해서인지, 애초에 검증 대상이 아닌지에 따라
+      <b>고쳐야 할 곳이 완전히 다릅니다.</b>
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>원인</th><th>건수</th><th>고칠 수 있는가</th></tr></thead>
+        <tbody>
+          <tr><td>전망·권고 주장</td><td>18</td><td class="dim">설계대로. 거르지 않고 흘려보냄</td></tr>
+          <tr><td>재무제표에 없는 계정</td><td>9</td><td class="good">도구 추가로 가능</td></tr>
+          <tr><td>검색·NLI 한계</td><td>8</td><td class="warn">임베딩 검색 후보</td></tr>
+          <tr><td>인과·변동성 등 수치 대조 불가</td><td>5</td><td class="dim">검증 대상 아님</td></tr>
+          <tr><td>공시에 그 부문이 없음</td><td>5</td><td class="dim">공시의 한계</td></tr>
+          <tr><td>부문 수치인데 매출이 아님</td><td>3</td><td class="dim">공시의 한계</td></tr>
+          <tr><td>주장에 수치가 없음</td><td>3</td><td class="dim">검증 대상 아님</td></tr>
+          <tr><td>기간이 너무 넓어 판정 불가</td><td>1</td><td class="dim">오탐 방지 가드</td></tr>
+          <tr><td>스냅샷 수집 범위</td><td>1</td><td class="good">재수집으로 가능</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">
+      <b>커버리지의 이론적 상한은 100% 가 아니라 약 75% 입니다.</b>
+      27건(28.7%)은 애초에 참·거짓을 가릴 수 있는 종류의 문장이 아닙니다.
+      이 표가 없으면 "커버리지 43.6%"를 보고 엉뚱한 곳을 고치게 됩니다.
+    </p>
+    <p class="dim">
+      직전 단계에서는 여기에 <b>"주장에 시점·주체가 없음" 12건</b>이 있었습니다.
+      주장 분해를 고쳐 0건이 됐습니다(아래 참고).
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>측정 3 — NLI 베이스라인의 천장</h2>
+    <p>
+      NLI 가 나쁘다는 것만으로는 부족합니다. <b>고칠 수 있는 나쁨인지</b>를 갈라야
+      다음에 무엇을 할지 정할 수 있습니다. 그래서 NLI 에게
+      <b>정답 근거를 직접 쥐여 주고</b> 판정시켰습니다. 검색 실패 0건, 방해 문장 0건입니다.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>조건</th><th>재현율</th><th>오탐률</th><th>커버리지</th></tr></thead>
+        <tbody>
+          <tr><td>쉬운 셋 · 토막 근거</td><td>40.0%</td><td class="good">0.0%</td><td>48.0%</td></tr>
+          <tr><td>쉬운 셋 · 문장 근거</td><td class="good">99.0%</td><td class="good">0.0%</td><td>98.5%</td></tr>
+          <tr><td>어려운 셋 · 토막 근거</td><td class="bad">7.7%</td><td class="bad">20.3%</td><td>63.0%</td></tr>
+          <tr class="pick"><td>어려운 셋 · 문장 근거</td><td class="bad">7.7%</td><td class="bad">36.5%</td><td>78.0%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      <b>쉬운 셋에서는 99% 까지 올라갑니다.</b> 베이스라인 실측이 61% 였으니
+      쉬운 주장에서는 검색 잡음이 38점을 깎아먹고 있었습니다.
+      <b>어려운 셋에서는 아무것도 통하지 않습니다.</b> 정답을 쥐여 줘도 52건 중 4건만
+      잡고, 근거를 더 좋게(문장으로) 줬더니 오탐률만 20.3% → 36.5% 로 올랐습니다.
+    </p>
+    <h3>임계값 조정은 확실히 죽은 길입니다</h3>
+    <p>
+      임계값 0.5부터 0.9까지 훑었는데 <b>재현율이 7.7% 에 전 구간 고정</b>입니다.
+      오류가 양방향 모두 고확신이기 때문입니다.
+    </p>
+    <pre>같은 값인데 표기가 다름   2,589,355억원  vs  258조 9,354억원  →  <span class="f">모순 0.999</span>
+크게 틀렸는데 통과        약 1조원       vs  1조 3,461억원    →  <span class="g">함의 0.998</span>
+연결/별도 구분 없음       별도 2조 9,387억 vs 연결 3조 6,945억  →  <span class="f">모순 0.999</span>
+증가/감소 뒤집기         403.6% 감소     vs  (+403.6%)        →  중립 0.998</pre>
+    <p class="note">
+      측정하면서 <b>제 실험의 결함도 하나 찾았습니다.</b> 처음에는 근거를
+      "삼성전자 2025-04-25 종가 55,700원" 같은 토막으로 넣었습니다. 주장과 값이
+      똑같은데도 중립 0.991 이 나왔습니다. KLUE NLI 는 문장 쌍으로 학습해서
+      토막을 문장으로 보지 않습니다. 이걸 모르고 넘어갔으면
+      <b>제 입력 형식 문제를 모델 탓으로 돌릴 뻔했습니다.</b>
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>에이전트가 한 일 — 라우팅 재분류</h2>
+    <p>
+      추출기가 붙인 유형을 그대로 쓰지 않습니다. 문장을 보고 다시 정합니다.
+      94건 중 <b>44건의 경로를 뒤집었습니다.</b>
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>추출기 유형</th><th>→ 에이전트 경로</th><th>건수</th><th>효과</th></tr></thead>
+        <tbody>
+          <tr><td>NARRATIVE</td><td>FORECAST</td><td>14</td><td class="dim">전망을 검증 대상에서 분리</td></tr>
+          <tr><td>NUMERIC</td><td>SEGMENT</td><td>9</td><td>부문별 매출 표로</td></tr>
+          <tr><td>NARRATIVE</td><td>NUMERIC</td><td>8</td><td class="good">NLI 대신 수치 대조로</td></tr>
+          <tr><td>NARRATIVE</td><td>PRICE</td><td>5</td><td class="good">NLI 대신 주가 계산으로</td></tr>
+          <tr><td>NUMERIC</td><td>FORECAST</td><td>4</td><td class="dim">전망을 분리</td></tr>
+          <tr><td>NARRATIVE</td><td>SEGMENT</td><td>3</td><td>부문별 매출 표로</td></tr>
+          <tr><td>NUMERIC</td><td>PRICE</td><td>1</td><td class="good">"주가 수익률"을 주가 도구로</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      NARRATIVE 로 분류되면 NLI 로 갑니다. 위 표에서 <b>13건이 NLI 대신 계산 경로로
+      돌아갔고</b>, 그 덕에 적발이 늘었습니다. 추출기가 NARRATIVE 40건을 줬는데
+      에이전트는 10건만 NLI 로 보냈습니다.
+    </p>
+    <pre>LG엔솔  2024년 1분기 영업이익 "전년 대비 +28%"  →  실제 <b>-75.2%</b>   <span class="f">모순</span>
+카카오  2024년 3월 말~5월 8일 주가 "약 26% 하락"   →  실제 <b>-9.3% ~ -7.1%</b>  <span class="f">모순</span></pre>
+    <h3>대체 경로는 재 보고 껐습니다</h3>
+    <p>
+      도구가 판정하지 못할 때 NLI 로 한 번 더 보내면 커버리지가 10%p 오릅니다.
+      <b>그래서 늘어난 9건을 전수 검토했습니다.</b> 근거가 타당한 것은 1건이었고,
+      나머지는 주가 변동성 주장을 부채비율로 반박하는 식이었습니다.
+      그중 1건은 거짓 <span class="good">SUPPORTED</span> 로 환각을 통과시켰습니다.
+      <b>올라간 10%p 는 판정이 아니라 잡음입니다.</b>
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>주장 분해를 고친 기록</h2>
+    <p>
+      확인 불가 12건이 <b>"주장에 시점이나 주체가 없어서"</b> 판정되지 못했습니다.
+      원문에는 있던 정보입니다.
+    </p>
+    <pre>원문: "POSCO홀딩스 주가는 2024년 1월 초 30만원 수준에서 4월 중순에는
+       36만원까지 상승하며 20% 이상 급등했습니다"
+주장: "2024년 4월 중순 POSCO홀딩스 주가는 20% 이상 급등했다"
+       <span class="f">↑ 시작 시점이 빠져 등락률을 계산할 구간이 없습니다</span></pre>
+    <p>
+      추출 프롬프트에 "회사와 연도를 반드시 넣어라"를 더해 봤습니다.
+      탈맥락화는 좋아졌지만 <b>추출이 보수적으로 바뀌어 서술 주장을 놓쳤습니다.</b>
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>접근</th><th>주장</th><th>NARRATIVE</th><th>원문 커버리지</th><th>시점 없음</th><th>주체 없음</th></tr></thead>
+        <tbody>
+          <tr><td>원래 (v3)</td><td>91</td><td>38</td><td>83.2%</td><td class="bad">33.0%</td><td class="bad">7.7%</td></tr>
+          <tr><td>프롬프트에 합침 (v4)</td><td>79</td><td>30</td><td class="bad">74.5%</td><td>19.0%</td><td class="good">0.0%</td></tr>
+          <tr><td>더 강하게 (v5)</td><td>74</td><td class="bad">24</td><td class="bad">71.7%</td><td>17.6%</td><td>2.7%</td></tr>
+          <tr class="pick"><td>두 단계로 분리</td><td>94</td><td>40</td><td class="good">83.9%</td><td class="good">4.3%</td><td class="good">0.0%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      한 프롬프트에 "빠짐없이 뽑아라"와 "엄밀하게 다듬어라"를 같이 넣으면 둘 중
+      하나가 눌립니다. 그래서 <b>분해와 다듬기를 두 단계로 나눴습니다.</b>
+      2단계는 다시 쓰기만 하고 주장을 지울 수 없습니다 —
+      <b>개수가 달라지면 코드가 결과를 통째로 버립니다.</b>
+      "지우지 마십시오"라고 부탁하는 대신 구조로 막았습니다.
+    </p>
+    <p class="note">
+      처음에는 주장 전부를 넘기고 "필요하면 고치라"고 했습니다.
+      <b>모델이 12개를 하나도 고치지 않고 그대로 돌려줬습니다.</b>
+      그래서 파이썬이 먼저 무엇이 빠졌는지 판정해, 그 주장만 짚어서 보냅니다.
+      이 프로젝트가 지켜 온 방식 그대로입니다 — <b>파이썬이 판단하고 LLM 은 쓰기만 합니다.</b>
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>측정이 잡아낸 오류들</h2>
+    <p class="dim">
+      전부 합성 데이터 테스트로는 안 나오고 실제 데이터에 돌려야 보인 것들입니다.
+      하나씩 회귀 테스트로 고정했습니다.
+    </p>
+
+    <div class="fix">
+      <div class="t">일률 3% 허용 오차가 환각을 놓쳤습니다</div>
+      <div>"4월 중순 POSCO홀딩스 주가는 36만원" — 그 기간 실제 최저가가 371,000원이라
+        36만원은 한 번도 없던 가격인데, 3% 하한을 <b>130원 차이로</b> 넘겨 통과했습니다.
+        주장에 적힌 자릿수를 허용 오차로 쓰도록 바꿨습니다.</div>
+    </div>
+
+    <div class="fix">
+      <div class="t">수정주가를 당시 호가로 착각할 뻔했습니다</div>
+      <div>20종목 중 3종목의 과거 시세가 분할·합병으로 보정돼 있었습니다
+        (삼성바이오로직스 호가 적합률 3.6%). KRX 에서 원주가를 따로 받아
+        <b>값 주장은 원주가, 등락률은 수정주가</b>로 판정합니다.</div>
+    </div>
+
+    <div class="fix">
+      <div class="t">수치를 말하지도 않은 주장이 모순으로 판정됐습니다</div>
+      <div>파서는 숫자가 없으면 값을 0 으로 채웁니다. 그대로 비교하면 주장 구간이
+        [0, 0] 이 되어 실제 값과 절대 겹치지 않습니다. "최저점을 찍은 후 회복세를
+        보였다"가 <b>"주장 0원 vs 실제 204,500원 → 모순"</b>이 됐습니다.
+        에이전트가 라우팅을 바꾸면서 가려져 있던 오탐이 드러났습니다.</div>
+    </div>
+
+    <div class="fix">
+      <div class="t">구간이 넓으면 아무 주장이나 통과했습니다</div>
+      <div>"전년 동기간 동안 13% 하락"이 2023년 전체 → 2024년 전체로 해석되어
+        실제 등락률 범위가 <b>-47.6% ~ +15.6% (63%p 폭)</b>이 됐고, 주장이 그 안에
+        들어가 통과했습니다. 값 주장에도 같은 구멍이 있었습니다
+        ("3분기 71,800원" → 92일 구간 44% 폭). 둘 다 상한을 걸어 막았습니다.</div>
+    </div>
+
+    <div class="fix">
+      <div class="t">표의 열이 기간이 아니라 지역이었습니다</div>
+      <div>부문별 매출 표를 뽑으면서 "뒤쪽 숫자 열은 기간"이라고 가정했는데,
+        기아 보고서는 열이 <b>국내·북중미·유럽</b>이었습니다. 그대로 읽으면 국내 매출
+        63조를 "2024년 매출"로 기록합니다. 합계 검수에서 93% 차이로 걸렸습니다.</div>
+    </div>
+
+    <div class="fix">
+      <div class="t">같은 계정명이 세 군데에 있었습니다</div>
+      <div>현대차 전체 재무제표에 "지배기업소유주지분"이 재무상태표(자본 92조),
+        손익계산서(순이익 11.9조), 포괄손익계산서(12.2조) 세 군데에 있습니다.
+        이름으로 집으면 <b>자본 92조를 "지배주주 순이익"으로 기록</b>합니다.
+        XBRL 식별자로 집도록 바꿨습니다.</div>
+    </div>
+
+    <div class="fix">
+      <div class="t">캐시가 옛 스키마의 응답을 돌려줬습니다</div>
+      <div>출력 스키마에 필드를 추가했는데 프롬프트는 그대로 뒀습니다.
+        응답 캐시는 프롬프트로 키를 만들기 때문에 <b>옛 스키마로 저장된 응답이
+        그대로 돌아왔고</b> 전부 검증 오류로 터졌습니다.
+        프롬프트에 파서 버전을 넣어 자동으로 무효화되게 했습니다.</div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>수집한 데이터</h2>
+    <p class="dim">
+      검증 중에는 외부에 접속하지 않습니다. 수집과 검증을 분리해 몇 달 뒤에도
+      같은 숫자가 나오게 했습니다.
+    </p>
+    <div class="tiles">
+      <div class="tile"><div class="k">주가</div><div class="v">18,920</div>
+        <div class="s">20종목 · 2023-01 ~ 2026-11<br>수정주가 + 원주가</div></div>
+      <div class="tile"><div class="k">재무 (DART)</div><div class="v">6,086</div>
+        <div class="s">20종목 × 2023~2026<br>연결/별도 · 계정 14종</div></div>
+      <div class="tile"><div class="k">부문별 매출</div><div class="v">2,040</div>
+        <div class="s">사업보고서 60건의 표<br>검수 이상 0건</div></div>
+      <div class="tile"><div class="k">배당·추가 계정</div><div class="v">284</div>
+        <div class="s">배당금 · 지배주주순이익<br>영업활동현금흐름</div></div>
+      <div class="tile"><div class="k">공시 본문</div><div class="v">25,370</div>
+        <div class="s">문장 단위<br>사업의 내용 · 경영진단</div></div>
+    </div>
+    <p class="note">
+      부문별 매출 표는 <b>합계를 재무제표 매출액과 대조</b>해 검수했습니다.
+      단위를 잘못 읽거나(억원 vs 백만원) 열을 잘못 짚으면 여기서 걸립니다.
+      표 파싱은 눈으로 몇 개 보고 "되는 것 같다"고 넘어가면 반드시 틀립니다.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>운영 — 월 $5 로 돌리기</h2>
+    <p>
+      0단계부터 응답 캐시와 비용 로거를 필수로 뒀습니다. API 응답마다
+      <b>이 호출이 얼마를 썼는지</b>가 붙습니다.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>단계</th><th>호출</th><th>캐시 적중</th><th>비용</th></tr></thead>
+        <tbody>
+          <tr><td>재무 주장 파서</td><td>2,344</td><td>61.3%</td><td>$0.274</td></tr>
+          <tr><td>LLM-as-judge (베이스라인)</td><td>822</td><td>28.0%</td><td>$0.105</td></tr>
+          <tr><td>주가 주장 파서</td><td>1,674</td><td class="good">79.3%</td><td>$0.080</td></tr>
+          <tr><td>주장 분해</td><td>86</td><td>25.6%</td><td>$0.045</td></tr>
+          <tr><td>탈맥락화</td><td>32</td><td>21.9%</td><td>$0.009</td></tr>
+          <tr><td>부문 주장 파서</td><td>112</td><td>64.3%</td><td>$0.007</td></tr>
+          <tr><td>답변 생성 (로컬 Ollama)</td><td>12</td><td>—</td><td class="good">$0.000</td></tr>
+          <tr class="pick"><td>합계</td><td>5,082</td><td>62.0%</td><td>$0.521</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      누적 호출 5,082 건 중 <b>62% 가 캐시 적중</b>입니다. 캐시가 없었으면 비용이
+      두 배 이상이었습니다. 캐시 적중을 비용 0 으로 기록하는 부분은
+      회귀 테스트로 고정했습니다 — 토큰 수가 응답에 남아 있어
+      <b>그대로 두면 캐시 적중도 과금으로 집계됩니다.</b>
+    </p>
+    <h3>API</h3>
+    <pre>GET  /health        스냅샷 5종과 키 준비 상태
+POST /verify        답변을 분해하고 주장마다 판정
+POST /verify/claim  주장 하나만 판정
+GET  /usage         이번 달 비용을 단계별로
+
+"usage": { "elapsed_seconds": 22.2, "cost_usd": <b>0.0</b>, "llm_calls": <b>5</b> }
+         <span class="g">↑ 호출 5건인데 비용 0 = 전부 캐시 적중</span></pre>
+  </section>
+
+  <section class="card">
+    <h2>남은 한계</h2>
+    <ol>
+      <li><b>의미 비교는 여전히 믿을 수 없습니다.</b> 94건 중 NLI 가 판정한 2건은
+        둘 다 근거 문장이 주장과 무관했습니다. 그래서 결과에
+        <code>confidence</code>(계산 / 추정)를 붙여 구분합니다.
+        둘을 한 칸에 세면 "모순 41건"이지만 그중 2건은 믿을 수 없습니다.</li>
+      <li><b>검색이 병목입니다.</b> 어휘 기반이라 의미가 같아도 표현이 다르면 못 찾습니다.
+        "반도체 사업 부문 실적 개선"과 "DS 부문 영업이익 흑자 전환"은 겹치는 낱말이 0 입니다.
+        임베딩 검색이 다음 후보이고, 남은 8건이 대상입니다.</li>
+      <li><b>테스트셋이 실제 환각과 분포가 다릅니다.</b> 오류를 의도적으로 주입해
+        만들었기 때문에 라벨은 확실하지만, 실제 LLM 이 내는 환각과는 결이 다릅니다.
+        그래서 실제 답변 94건을 따로 돌려 커버리지를 별도로 냅니다.</li>
+      <li><b>유니버스가 20종목입니다.</b> 그 밖의 종목은 전부 확인 불가입니다.
+        데이터 수집을 늘리면 되지만, 지금은 측정 재현성을 위해 고정해 두었습니다.</li>
+    </ol>
+  </section>
+
+  <footer>
+    PIERROT · github.com/kimseongmin0301/pierrot · 2026-11-19 기준<br>
+    테스트 417개 통과 · 재현 <code>evaluation/run_eval.py</code>, <code>scripts/run_verifier.py</code>
+  </footer>
+</div>
