@@ -200,20 +200,25 @@ def test_전망_주장은_도구를_타지_않고_사유가_남는다(monkeypatc
 
 
 def test_대체_경로를_켜면_확인_불가를_의미_비교가_받는다(monkeypatch, tools):
+    """주가 경로로 시험합니다.
+
+    재무 경로는 확인 불가일 때 부문 경로로 먼저 가므로 대체 경로 시험에
+    쓰면 두 가지가 섞입니다.
+    """
     _patch(
         monkeypatch,
-        numeric=FakeResult(FakeVerdict("UNVERIFIABLE"), "재무제표 주요계정에 없습니다"),
+        price=FakeResult(FakeVerdict("UNVERIFIABLE"), "기간을 특정할 수 없습니다"),
         narrative=FakeResult(FakeVerdict("CONTRADICTED"), "근거 문장과 모순입니다"),
     )
     graph = build_graph(tools)
 
     result = verify_claim(
-        "카카오의 광고 사업 부문 매출은 1,509억 원이다",
+        "삼성전자 주가는 2024년 4월 9일 종가 기준 71,800원이다",
         graph=graph,
         allow_fallback=True,
     )
     assert result.used_fallback
-    assert [a.route for a in result.attempts] == [Route.NUMERIC, Route.NARRATIVE]
+    assert [a.route for a in result.attempts] == [Route.PRICE, Route.NARRATIVE]
     assert result.verdict is Verdict.CONTRADICTED
     assert result.route is Route.NARRATIVE
 
@@ -222,18 +227,18 @@ def test_둘_다_확인_불가면_첫_시도의_사유를_남긴다(monkeypatch,
     """1차 사유가 더 구체적입니다. 대체 경로 사유로 덮으면 진단이 어려워집니다."""
     _patch(
         monkeypatch,
-        numeric=FakeResult(FakeVerdict("UNVERIFIABLE"), "재무제표 주요계정에 없습니다"),
+        price=FakeResult(FakeVerdict("UNVERIFIABLE"), "기간을 특정할 수 없습니다"),
         narrative=FakeResult(FakeVerdict("UNVERIFIABLE"), "기준을 넘는 관계가 없습니다"),
     )
     graph = build_graph(tools)
 
     result = verify_claim(
-        "카카오의 광고 사업 부문 매출은 1,509억 원이다",
+        "삼성전자 주가는 2024년 4월 9일 종가 기준 71,800원이다",
         graph=graph,
         allow_fallback=True,
     )
     assert result.verdict is Verdict.UNVERIFIABLE
-    assert result.reason == "재무제표 주요계정에 없습니다"
+    assert result.reason == "기간을 특정할 수 없습니다"
     assert len(result.attempts) == 2
 
 

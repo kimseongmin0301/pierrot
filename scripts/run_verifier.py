@@ -136,7 +136,9 @@ def main() -> int:
         print(f"    {verdict.value:14} {verdicts[verdict]:3}건")
     print()
     print("  경로 (추출기 유형 -> 에이전트 경로)")
-    for route in (Route.PRICE, Route.NUMERIC, Route.NARRATIVE, Route.FORECAST):
+    for route in (
+        Route.PRICE, Route.NUMERIC, Route.SEGMENT, Route.NARRATIVE, Route.FORECAST
+    ):
         print(
             f"    {route.value:10} 에이전트 {routes[route]:3}건"
             f"   (추출기 {declared.get(route.value, 0):3}건)"
@@ -169,6 +171,16 @@ def main() -> int:
         f"    의미 비교로 추정    {len(inferred):3}건   NLI 판정. "
         f"근거 문장이 주장과 무관할 수 있어 그대로 믿으면 안 됩니다."
     )
+
+    segment_used = [r for r in results if any(a.route is Route.SEGMENT for a in r.attempts)]
+    segment_decided = [r for r in segment_used if r.verdict is not Verdict.UNVERIFIABLE]
+    print()
+    print(
+        f"  부문별 매출 경로: {len(segment_used)}건 시도, "
+        f"{len(segment_decided)}건이 판정으로 바뀜"
+    )
+    for result in segment_decided[:10]:
+        print(f"    {result.verdict.value:13} {result.claim_text[:72]}")
 
     if args.fallback:
         rescued = [r for r in fallbacks if r.verdict is not Verdict.UNVERIFIABLE]

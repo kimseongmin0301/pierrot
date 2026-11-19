@@ -1,9 +1,14 @@
 """검증 에이전트 그래프.
 
-    주장 ─→ classify ─┬─ PRICE ─────→ price ────┐
-                      ├─ NUMERIC ───→ numeric ──┼─→ (확인 불가면) ─→ narrative ─┐
-                      ├─ NARRATIVE ─→ narrative ┘                               │
-                      └─ FORECAST ──→ forecast ────────────────────────────────┴─→ finalize
+    주장 ─→ classify ─┬─ PRICE ─────→ price ──────────────────────────┐
+                      │                                                 │
+                      ├─ NUMERIC ───→ numeric ─(계정 없음)→ segment ───┤
+                      │                  └──────────────────────────────┤
+                      ├─ NARRATIVE ─→ narrative ───────────────────────┤
+                      └─ FORECAST ──→ forecast ────────────────────────┴─→ finalize
+
+    (대체 경로를 켜면 price / numeric / segment 가 확인 불가일 때
+     narrative 로 한 번 더 갑니다. 기본은 끔입니다.)
 
 왜 스크립트 세 개를 그래프 하나로 묶는가:
 
@@ -34,6 +39,7 @@ from .nodes import (
     make_narrative_node,
     make_numeric_node,
     make_price_node,
+    make_segment_node,
 )
 from .state import Attempt, Route, VerificationResult, Verdict, VerifierState
 from .tools import VerifierTools
@@ -41,6 +47,7 @@ from .tools import VerifierTools
 NODE_CLASSIFY = "classify"
 NODE_PRICE = "price"
 NODE_NUMERIC = "numeric"
+NODE_SEGMENT = "segment"
 NODE_NARRATIVE = "narrative"
 NODE_FORECAST = "forecast"
 NODE_FINALIZE = "finalize"
@@ -48,6 +55,7 @@ NODE_FINALIZE = "finalize"
 _ROUTE_TO_NODE = {
     Route.PRICE.value: NODE_PRICE,
     Route.NUMERIC.value: NODE_NUMERIC,
+    Route.SEGMENT.value: NODE_SEGMENT,
     Route.NARRATIVE.value: NODE_NARRATIVE,
     Route.FORECAST.value: NODE_FORECAST,
 }
@@ -55,6 +63,20 @@ _ROUTE_TO_NODE = {
 
 def _route_after_classify(state: VerifierState) -> str:
     return _ROUTE_TO_NODE.get(state.get("route", ""), NODE_NARRATIVE)
+
+
+def _route_after_numeric(state: VerifierState) -> str:
+    """재무 경로 다음에 어디로 갈지.
+
+    계정을 못 찾아 끝났고 부문 표로 볼 거리가 있으면 부문 경로로 보냅니다.
+    부문 경로는 대체 경로(`allow_fallback`)와 무관하게 항상 켜져 있습니다.
+    NLI 추정과 달리 **공시 표와 수치를 직접 대조**하므로 판정의 성격이
+    같기 때문입니다(둘 다 CALCULATED).
+    """
+    attempts = state.get("attempts") or []
+    if attempts and attempts[-1]["verdict"] == "UNVERIFIABLE" and state.get("segment_hint"):
+        return NODE_SEGMENT
+    return _route_after_tool(state)
 
 
 def _route_after_tool(state: VerifierState) -> str:
@@ -81,6 +103,7 @@ def build_graph(tools: VerifierTools | None = None):
     builder.add_node(NODE_CLASSIFY, make_classify_node())
     builder.add_node(NODE_PRICE, make_price_node(tools))
     builder.add_node(NODE_NUMERIC, make_numeric_node(tools))
+    builder.add_node(NODE_SEGMENT, make_segment_node(tools))
     builder.add_node(NODE_NARRATIVE, make_narrative_node(tools))
     builder.add_node(NODE_FORECAST, make_forecast_node())
     builder.add_node(NODE_FINALIZE, make_finalize_node())
@@ -92,13 +115,25 @@ def build_graph(tools: VerifierTools | None = None):
         {
             NODE_PRICE: NODE_PRICE,
             NODE_NUMERIC: NODE_NUMERIC,
+            NODE_SEGMENT: NODE_SEGMENT,
             NODE_NARRATIVE: NODE_NARRATIVE,
             NODE_FORECAST: NODE_FORECAST,
         },
     )
 
-    # 도구 경로는 실패하면 의미 비교로 한 번 더 갈 수 있습니다.
-    for node in (NODE_PRICE, NODE_NUMERIC):
+    # 재무 경로는 계정을 못 찾으면 부문 표로 한 번 더 갑니다.
+    builder.add_conditional_edges(
+        NODE_NUMERIC,
+        _route_after_numeric,
+        {
+            NODE_SEGMENT: NODE_SEGMENT,
+            NODE_NARRATIVE: NODE_NARRATIVE,
+            NODE_FINALIZE: NODE_FINALIZE,
+        },
+    )
+
+    # 나머지 도구 경로는 실패하면 (대체 경로가 켜져 있을 때만) 의미 비교로 갑니다.
+    for node in (NODE_PRICE, NODE_SEGMENT):
         builder.add_conditional_edges(
             node,
             _route_after_tool,

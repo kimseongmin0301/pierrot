@@ -40,6 +40,13 @@ class Route(str, Enum):
     NUMERIC = "NUMERIC"
     """DART 재무 스냅샷과 대조합니다."""
 
+    SEGMENT = "SEGMENT"
+    """사업보고서의 부문별·제품별 매출 표와 대조합니다.
+
+    재무제표 주요계정에 없는 수치(HBM 매출, 광고 부문 매출, 철강 부문 영업이익)를
+    맡습니다. 재무 경로가 "주요계정에 없습니다" 로 끝났을 때만 탑니다.
+    """
+
     NARRATIVE = "NARRATIVE"
     """근거 문장을 검색해 NLI 로 의미를 비교합니다."""
 
@@ -80,6 +87,7 @@ class Confidence(str, Enum):
 _ROUTE_CONFIDENCE = {
     "PRICE": Confidence.CALCULATED,
     "NUMERIC": Confidence.CALCULATED,
+    "SEGMENT": Confidence.CALCULATED,
     "NARRATIVE": Confidence.INFERRED,
     "FORECAST": Confidence.NONE,
 }
@@ -199,3 +207,10 @@ class VerifierState(TypedDict, total=False):
 
     allow_fallback: bool
     """1차 경로가 확인 불가일 때 NARRATIVE 로 한 번 더 시도할지."""
+
+    segment_hint: dict[str, Any]
+    """재무 경로가 계정을 못 찾았을 때 부문 경로에 넘길 정보.
+
+    재무 파서를 두 번 호출하지 않으려고 1차 결과를 그대로 넘깁니다.
+    파서 호출은 돈이 듭니다(gpt-4o-mini). 비어 있으면 부문 경로로 가지 않습니다.
+    """

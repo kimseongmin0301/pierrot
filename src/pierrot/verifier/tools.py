@@ -50,8 +50,11 @@ class VerifierTools:
     _nli: Any = field(default=None, repr=False)
     _price_parser: Any = field(default=None, repr=False)
     _numeric_parser: Any = field(default=None, repr=False)
+    _segment_parser: Any = field(default=None, repr=False)
 
+    _segments: Any = field(default=None, repr=False)
     _documents_tried: bool = field(default=False, repr=False)
+    _segments_tried: bool = field(default=False, repr=False)
 
     # -- 데이터 ------------------------------------------------------------
 
@@ -70,6 +73,18 @@ class VerifierTools:
 
             self._financials = FinancialSnapshot.load()
         return self._financials
+
+    def segments(self):
+        """부문별 매출 스냅샷. 없으면 None(수집 전이어도 나머지는 돌아가야 합니다)."""
+        if not self._segments_tried:
+            self._segments_tried = True
+            try:
+                from ..tools.segments import SegmentSnapshot
+
+                self._segments = SegmentSnapshot.load()
+            except FileNotFoundError:
+                self._segments = None
+        return self._segments
 
     def documents(self):
         """공시 본문. 없으면 None 입니다(수집 전이어도 나머지는 돌아가야 합니다)."""
@@ -109,6 +124,17 @@ class VerifierTools:
             self._numeric_parser = build_numeric_parser(settings=self.settings)
         return self._numeric_parser
 
+    def segment_parser(self):
+        """부문 주장 파서 (gpt-4o-mini).
+
+        재무 경로가 "주요계정에 없습니다" 로 끝났을 때만 호출합니다.
+        """
+        if self._segment_parser is None:
+            from ..tools.segment_claim import build_segment_parser
+
+            self._segment_parser = build_segment_parser(settings=self.settings)
+        return self._segment_parser
+
     # -- 점검 --------------------------------------------------------------
 
     def loaded(self) -> dict[str, bool]:
@@ -117,7 +143,9 @@ class VerifierTools:
             "prices": self._prices is not None,
             "financials": self._financials is not None,
             "documents": self._documents is not None,
+            "segments": self._segments is not None,
             "nli": self._nli is not None,
             "price_parser": self._price_parser is not None,
             "numeric_parser": self._numeric_parser is not None,
+            "segment_parser": self._segment_parser is not None,
         }

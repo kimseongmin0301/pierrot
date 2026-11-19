@@ -122,9 +122,46 @@ def make_numeric_node(tools: VerifierTools) -> NodeFn:
             "fs_explicit": result.fs_explicit,
             "query": query.describe(),
         }
-        return _done(Route.NUMERIC, result.verdict.value, result.reason, result.evidence, detail)
+        update = _done(
+            Route.NUMERIC, result.verdict.value, result.reason, result.evidence, detail
+        )
+
+        # 계정을 못 찾아 끝났다면 부문별 매출 표로 넘길 거리를 남깁니다.
+        # 파서를 다시 부르지 않으려고 1차 결과를 그대로 전달합니다(호출은 돈입니다).
+        if result.verdict.value == "UNVERIFIABLE":
+            update["segment_hint"] = _segment_hint(result.reason)
+        return update
 
     return node
+
+
+# 재무 경로가 "부문 수치라 못 본다"고 끝났을 때 나오는 사유의 표지입니다.
+# 이 말이 들어 있을 때만 부문 경로로 넘깁니다. 넓히면 "기간을 특정할 수
+# 없습니다" 같은 전혀 다른 실패까지 부문 표로 보내 LLM 호출만 낭비합니다.
+_SEGMENT_MARKS = ("주요계정에 없습니다", "부문별", "사업 부문", "주요계정으로 확인할 수 없습니다")
+
+# 위 표지에 걸리지만 부문 주장이 **아닌** 것들입니다. 실측에서 부문 경로를 탄
+# 21건 중 12건이 여기 해당했고, 전부 "부문별 실적 주장이 아닙니다"로 끝났습니다.
+# 결과는 맞지만 그만큼 LLM 호출을 헛되이 썼습니다.
+_NOT_SEGMENT_MARKS = (
+    "배당", "영업이익률", "이익률", "지배주주", "예상치", "수익률",
+    "매출 증가의 원인", "주가",
+)
+
+
+def _segment_hint(reason: str) -> dict[str, Any]:
+    """재무 경로의 실패 사유를 보고 부문 경로로 넘길지 정합니다.
+
+    종목·연도·금액을 여기서 뽑지 않는 이유: 재무 파서는 부문 주장을 OTHER 로
+    분류하면서 **계정·금액 필드를 비워 둡니다.** 사유 문구에만 이름이 남습니다.
+    그래서 부문 경로가 전용 파서로 다시 읽습니다(`segment_claim`).
+    """
+    text = reason or ""
+    if any(mark in text for mark in _NOT_SEGMENT_MARKS):
+        return {}
+    if any(mark in text for mark in _SEGMENT_MARKS):
+        return {"reason": text}
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +196,93 @@ def make_narrative_node(tools: VerifierTools) -> NodeFn:
         }
         return _done(
             Route.NARRATIVE, result.verdict.value, result.reason, result.evidence, detail
+        )
+
+    return node
+
+
+# ---------------------------------------------------------------------------
+# 4-2. 부문별 매출 경로
+# ---------------------------------------------------------------------------
+
+
+def make_segment_node(tools: VerifierTools) -> NodeFn:
+    """사업보고서의 부문별·제품별 매출 표와 대조합니다.
+
+    재무제표 주요계정에는 부문 수치가 없습니다. 3단계 실측에서 확인 불가
+    55건 중 가장 큰 덩어리가 이것이었습니다(HBM, 광고 부문, 철강 부문 등).
+    """
+
+    def node(state: VerifierState) -> dict[str, Any]:
+        from ..tools.segment_claim import parse_segment_claim
+        from ..tools.segment_verify import verify_segment_claim
+
+        snapshot = tools.segments()
+        if snapshot is None:
+            return _done(
+                Route.SEGMENT,
+                "UNVERIFIABLE",
+                "부문별 매출 스냅샷이 없습니다. "
+                "scripts/fetch_segment_snapshot.py 를 먼저 실행해 주십시오.",
+                [],
+                {},
+            )
+
+        try:
+            query = parse_segment_claim(
+                state["claim_text"],
+                parser=tools.segment_parser(),
+                settings=tools.settings,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _failed(Route.SEGMENT, f"부문 주장 해석 중 오류: {exc}")
+
+        if not query.is_resolved:
+            return _done(Route.SEGMENT, "UNVERIFIABLE", query.unresolved, [], {})
+
+        assert query.stock is not None
+        parsed = query.parsed
+
+        # 분기 주장이면 그 분기의 전사 매출을 상한으로 씁니다.
+        # 부문별 표는 연간이라, 분기 주장을 연간 합계와 견주면 상한이
+        # 네 배로 느슨해져 명백히 불가능한 주장도 빠져나갑니다.
+        period_total = None
+        period_label = ""
+        if parsed.quarter:
+            facts = tools.financials().lookup(
+                query.stock.code, parsed.bsns_year, "매출액",
+                quarter=parsed.quarter, fs_div="CFS",
+            )
+            if facts:
+                period_total = float(facts[0].amount)
+                period_label = f"{parsed.bsns_year}년 {parsed.quarter}분기"
+
+        try:
+            result = verify_segment_claim(
+                stock=query.stock,
+                year=parsed.bsns_year,
+                account=parsed.segment,
+                claimed=float(query.amount) if query.amount is not None else None,
+                snapshot=snapshot,
+                period_total=period_total,
+                period_label=period_label,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return _failed(Route.SEGMENT, f"부문 판정 중 오류: {exc}")
+
+        detail = {
+            "query": query.describe(),
+            "keyword": result.keyword,
+            "claimed": result.claimed,
+            "observed": result.observed,
+            "tolerance": result.tolerance,
+            "matched_name": result.matched_name,
+            "total": result.total,
+            "available": list(result.available),
+            "used_upper_bound": result.used_upper_bound,
+        }
+        return _done(
+            Route.SEGMENT, result.verdict.value, result.reason, result.evidence, detail
         )
 
     return node
@@ -206,7 +330,19 @@ def make_finalize_node() -> NodeFn:
             return {}
 
         decided = [a for a in attempts if a["verdict"] != "UNVERIFIABLE"]
-        chosen = decided[-1] if decided else attempts[0]
+        if decided:
+            chosen = decided[-1]
+        else:
+            # 전부 확인 불가일 때 어느 사유를 남길지.
+            #
+            # 도구 경로(주가·재무·부문)의 사유가 의미 비교 사유보다 구체적입니다.
+            #   도구:      "NAVER 2024년 공시에 '광고' 부문이 없습니다.
+            #              공시된 부문: 서치플랫폼, 커머스, ..."
+            #   의미 비교: "기준(0.70)을 넘는 관계가 없습니다"
+            # 그래서 도구 경로 중 **마지막** 것을 씁니다. 뒤로 갈수록
+            # 더 좁혀 들어간 판단이기 때문입니다(재무 -> 부문).
+            tool_attempts = [a for a in attempts if a["route"] != "NARRATIVE"]
+            chosen = tool_attempts[-1] if tool_attempts else attempts[0]
         return {
             "verdict": chosen["verdict"],
             "reason": chosen["reason"],
