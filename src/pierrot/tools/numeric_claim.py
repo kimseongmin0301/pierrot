@@ -21,7 +21,7 @@ from ..config import Settings, get_settings
 from ..llm import get_openai_chat
 from .amounts import parse_korean_amount
 from .dart import ACCOUNT_ALIASES
-from .direction_rescue import rescue
+from .direction_rescue import find_claims, rescue
 from .superlative import detect as detect_superlative
 from .universe import Stock, find_stock
 
@@ -254,6 +254,16 @@ class NumericQuery:
     unresolved: str
     """조회 조건을 만들지 못한 이유. 만들었으면 빈 문자열."""
 
+    conjunction: tuple[tuple[str, str], ...] = ()
+    """한 문장에 사실이 여럿일 때 (계정, 방향) 쌍 전부.
+
+    비어 있지 않으면 **전부 확인해야** 판정할 수 있습니다. 하나만 보고
+    통과시키면 거짓 주장이 참으로 판정됩니다. 실제로 그랬습니다.
+
+        "매출이 증가하였으나 영업이익과 순이익은 줄어드는 추세"
+        -> 매출만 보고 '근거 있음'. 영업이익은 -7.7조에서 +23.5조로 늘었는데도.
+    """
+
     superlative: str = ""
     """최상급 주장('역대 최대 매출')이면 그 계정 이름.
 
@@ -317,6 +327,26 @@ def build_query(
         return NumericQuery(
             parsed.model_copy(update={"account": top, "quarter": 0}),
             stock, None, "", superlative=top,
+        )
+
+    # 한 문장에 사실이 여럿이면 **전부** 확인해야 합니다.
+    #
+    # 분해 단계가 "한 주장에는 사실 하나만" 을 늘 지키지는 못합니다.
+    # 쪼개지지 않은 문장을 하나의 방향 주장으로 다루면 앞부분만 보고
+    # 통과시킵니다. 분해를 고치는 것과 별개로 판정기가 막아야 합니다.
+    pairs = find_claims(claim_text)
+    if len(pairs) > 1:
+        stock = find_stock(parsed.company)
+        if stock is None:
+            return NumericQuery(
+                parsed, None, None,
+                f"유니버스에 없는 종목입니다: {parsed.company or '(표기 없음)'}",
+            )
+        if not parsed.bsns_year or parsed.bsns_year < 1900:
+            return NumericQuery(parsed, stock, None, "사업연도를 특정할 수 없습니다")
+        return NumericQuery(
+            parsed.model_copy(update={"is_financial_claim": True}),
+            stock, None, "", conjunction=tuple(pairs),
         )
 
     if not parsed.is_financial_claim or parsed.assertion is FinancialAssertion.OTHER:

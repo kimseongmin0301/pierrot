@@ -174,6 +174,9 @@ def verify_numeric_claim(
             f"{' (' + query.parsed.fs_hint + ' 기준)' if query.fs_div else ''}",
         )
 
+    if query.conjunction:
+        return _verify_conjunction(query, snapshot)
+
     if query.superlative:
         return _verify_superlative(query, snapshot)
 
@@ -185,6 +188,78 @@ def verify_numeric_claim(
     if assertion is FinancialAssertion.DIRECTION:
         return _verify_direction(query, facts, snapshot)
     return NumericVerification(Verdict.UNVERIFIABLE, "판정 방법이 정해지지 않은 주장입니다")
+
+
+def _verify_conjunction(
+    query: NumericQuery, snapshot: FinancialSnapshot
+) -> NumericVerification:
+    """한 문장에 사실이 여럿인 주장. **전부** 확인하고 묶습니다.
+
+    묶는 규칙은 '그리고' 입니다. 한 문장이 여러 사실을 이어 붙였으면
+    **하나라도 틀리면 그 문장은 틀린 것**입니다.
+
+        전부 맞음      -> 근거 있음
+        하나라도 틀림   -> 모순 (어느 것이 틀렸는지 적습니다)
+        판정 못 한 것이 남음 -> 확인 불가
+
+    하나만 보고 통과시키던 오탐을 막는 것이 목적입니다.
+
+        "매출이 증가하였으나 영업이익과 순이익은 줄어드는 추세"
+        -> 전에는 매출만 보고 '근거 있음'. 영업이익은 -7.7조에서
+           +23.5조로 늘었는데도 그랬습니다.
+    """
+    from .numeric_claim import Direction as ClaimDirection
+
+    assert query.stock is not None
+    parts: list[str] = []
+    wrong: list[str] = []
+    unknown: list[str] = []
+
+    for account, direction in query.conjunction:
+        sub = NumericQuery(
+            parsed=query.parsed.model_copy(
+                update={
+                    "account": account,
+                    "assertion": FinancialAssertion.DIRECTION,
+                    "direction": ClaimDirection(direction),
+                    "amount_text": "",
+                    "growth_percent": 0.0,
+                }
+            ),
+            stock=query.stock,
+            amount=None,
+            unresolved="",
+        )
+        result = verify_numeric_claim(sub, snapshot)
+        label = "증가" if direction == "UP" else "감소"
+        if result.verdict is Verdict.SUPPORTED:
+            parts.append(f"{account} {label} (맞음)")
+        elif result.verdict is Verdict.CONTRADICTED:
+            parts.append(f"{account} {label} (**틀림**)")
+            wrong.append(account)
+        else:
+            parts.append(f"{account} {label} (확인 불가)")
+            unknown.append(account)
+
+    head = (
+        f"{query.stock.name} {query.parsed.bsns_year}년 "
+        f"{'연간' if query.parsed.quarter == 0 else str(query.parsed.quarter) + '분기'} — "
+        f"한 문장에 사실이 {len(query.conjunction)}개입니다. 전부 확인했습니다: "
+    )
+    body = ", ".join(parts)
+
+    if wrong:
+        return NumericVerification(
+            Verdict.CONTRADICTED,
+            head + body + f" -> {', '.join(wrong)} 부분이 사실과 다릅니다",
+        )
+    if unknown:
+        return NumericVerification(
+            Verdict.UNVERIFIABLE,
+            head + body + f" -> {', '.join(unknown)} 부분을 판정하지 못해 "
+            "문장 전체를 확정할 수 없습니다",
+        )
+    return NumericVerification(Verdict.SUPPORTED, head + body + " -> 전부 맞습니다")
 
 
 def _verify_superlative(

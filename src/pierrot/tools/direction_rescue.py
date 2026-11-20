@@ -151,3 +151,88 @@ def rescue(text: str) -> tuple[str, str]:
     if not account or not direction:
         return "", ""
     return account, direction
+
+
+# ---------------------------------------------------------------------------
+# 한 문장에 사실이 여럿인 주장
+# ---------------------------------------------------------------------------
+#
+# 분해 단계가 "한 주장에는 사실 하나만" 을 지키지 못하는 경우가 있습니다.
+#
+#     "2024년에는 매출이 다시 증가하였으나 영업이익과 순이익은
+#      각각 줄어드는 추세를 보였다"
+#
+# 이걸 하나의 방향 주장으로 다루면 **앞부분만 보고 통과시킵니다.**
+# 실제로 그랬습니다. 매출은 늘었으므로 '근거 있음' 이 났는데,
+# 영업이익은 -7.7조에서 +23.5조로 **늘었습니다.** 주장은 거짓인데
+# 참으로 판정됐습니다. 지금까지 중 가장 나쁜 오탐입니다.
+#
+# 분해를 고치는 것과 별개로, **판정기가 문장 일부만 보고 통과시키지
+# 않도록** 막아야 합니다. 분해가 완벽해질 수는 없기 때문입니다.
+
+# 앞뒤 절을 가르는 이음말. 대조("~으나")와 나열("~고") 둘 다 봅니다.
+_SPLIT = re.compile(
+    r"(?:으나|이나|지만|하나|했으나|하였으나)\s*|(?:반면|하지만|다만)[,\s]|,\s*"
+    r"|(?:하였고|했고|이고|이며|하며|였으며|으며)\s*"
+)
+
+# 한 절 안에서 여러 계정을 묶는 표현. "영업이익과 순이익은 ~"
+_AND = re.compile(r"와|과|및|,")
+
+
+def split_segments(text: str) -> list[str]:
+    """문장을 절 단위로 가릅니다. 절마다 방향이 다를 수 있습니다."""
+    parts = [part.strip() for part in _SPLIT.split(text or "") if part and part.strip()]
+    return parts or [(text or "").strip()]
+
+
+def find_all_accounts(text: str) -> list[str]:
+    """한 절에 들어 있는 계정을 **모두** 찾습니다.
+
+    "영업이익과 순이익은 줄었다" 에서 둘 다 찾아야 합니다.
+    긴 이름을 먼저 맞추고, 찾은 부분은 지워 가며 다음을 찾습니다.
+    """
+    target = text or ""
+    found: list[str] = []
+    for word, account in ACCOUNT_WORDS:
+        if word in target and account not in found:
+            found.append(account)
+            target = target.replace(word, " ")
+    return found
+
+
+def find_claims(text: str) -> list[tuple[str, str]]:
+    """문장에서 (계정, 방향) 쌍을 모두 뽑습니다.
+
+    한 쌍만 나오면 평범한 방향 주장입니다. 둘 이상이면 **한 문장에
+    사실이 여럿**이라는 뜻이고, 전부 확인해야 판정할 수 있습니다.
+
+    방향을 못 읽은 절에 계정이 들어 있으면 빈 목록을 돌려줍니다.
+    일부만 확인하고 넘어가는 것이 가장 위험하기 때문입니다.
+    """
+    target = (text or "").strip()
+    if not target or HAS_NUMBER.search(target) or SEGMENT_WORDS.search(target):
+        return []
+    if CAUSAL_WORDS.search(target):
+        return []
+
+    pairs: list[tuple[str, str]] = []
+    for segment in split_segments(target):
+        accounts = find_all_accounts(segment)
+        if not accounts:
+            continue
+        direction = find_direction(segment)
+        if not direction:
+            # 계정은 있는데 방향을 못 읽었습니다. 일부만 보고 판정하면
+            # 안 되므로 통째로 포기합니다.
+            return []
+        for account in accounts:
+            if (account, direction) not in pairs:
+                pairs.append((account, direction))
+
+    # 같은 계정에 서로 다른 방향이 붙었으면 해석할 수 없습니다.
+    seen: dict[str, str] = {}
+    for account, direction in pairs:
+        if seen.setdefault(account, direction) != direction:
+            return []
+    return pairs
