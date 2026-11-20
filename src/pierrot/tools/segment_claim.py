@@ -175,9 +175,21 @@ def build_query(parsed: ParsedSegmentClaim) -> SegmentQuery:
 
     amount = parse_korean_amount(parsed.amount_text)
     if amount is None:
+        # 사유를 두 가지로 나눕니다. 전에는 둘 다 "금액을 읽을 수 없습니다:
+        # (표기 없음)" 으로 끝나 **무엇이 문제인지 알 수 없었습니다.**
+        #
+        #   금액이 아예 없다   -> 지금 도구로는 다룰 수 없는 종류입니다
+        #   금액이 있는데 못 읽음 -> 표기를 못 읽은 것이므로 고칠 수 있습니다
+        if not (parsed.amount_text or "").strip():
+            return SegmentQuery(
+                parsed, stock, None,
+                f"'{parsed.segment}' 부문 주장에 금액이 적혀 있지 않습니다. "
+                f"부문별 표와는 금액으로만 대조할 수 있어 증감 방향만 말한 "
+                f"부문 주장은 아직 판정하지 못합니다.",
+            )
         return SegmentQuery(
             parsed, stock, None,
-            f"금액을 읽을 수 없습니다: {parsed.amount_text or '(표기 없음)'}",
+            f"금액 표기를 읽지 못했습니다: {parsed.amount_text}",
         )
     return SegmentQuery(parsed, stock, amount, "")
 

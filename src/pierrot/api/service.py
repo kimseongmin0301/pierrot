@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import Settings, get_settings
-from ..cost import CostLogger
+from ..llm import get_cost_logger
 from ..extractor import extract_claims
 from ..reporter import Report, build_report
 from ..verifier import VerifierTools, build_graph, verify_claim
@@ -66,10 +66,12 @@ class VerificationService:
         self.settings = settings or get_settings()
         self.tools = VerifierTools(settings=self.settings)
         self.graph = graph if graph is not None else build_graph(self.tools)
-        self.cost = CostLogger(
-            log_path=self.settings.cost_log_path,
-            monthly_budget_usd=self.settings.monthly_budget_usd,
-        )
+        # **반드시 프로세스 공용 로거**를 씁니다. 여기서 새로 만들면
+        # LLM 호출은 `llm.get_cost_logger()` 의 인스턴스에 기록되는데
+        # 이 인스턴스의 누적액은 0 그대로입니다. 비용을 누적액의 **차이**로
+        # 재므로 모든 요청이 $0 으로 보고됐습니다. 실제로는 20건에
+        # 약 $0.025 가 나갔는데 화면에는 $0.00000 이 찍혔습니다.
+        self.cost = get_cost_logger(self.settings)
         # 검증 한 번에 하나씩. 이유는 모듈 설명 참고.
         self._lock = threading.Lock()
         self._extractor: Any | None = None

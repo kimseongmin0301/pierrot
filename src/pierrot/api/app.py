@@ -122,6 +122,7 @@ def create_app(service: VerificationService | None = None) -> FastAPI:
             annotated_answer=report.annotated_answer() if request.annotate else "",
             claims=payload["claims"],
             summary=payload["summary"],
+            uncovered=payload.get("uncovered", []),
             usage=used.to_dict(),
             extractor=extractor_info,
         )

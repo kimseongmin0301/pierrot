@@ -34,6 +34,21 @@ from .direction_rescue import CAUSAL_WORDS, HAS_NUMBER, SEGMENT_WORDS, find_acco
 SUPERLATIVE_WORDS = re.compile(
     r"역대\s*(최대|최고|최다)|사상\s*(최대|최고)|최대\s*치|최고\s*치"
     r"|신기록|기록적\s*인?\s*(매출|실적)|역대급"
+    # '역대' 가 없는 최상급도 같은 주장입니다. 실측에서 빠져나갔습니다.
+    #   "2020년부터 2025년까지 6개 연도 중 가장 높은 수치였다"
+    #   -> "구체적인 수치가 없으므로 OTHER" 로 끝났습니다. 사유가 틀렸습니다.
+    r"|가장\s*(높은|큰|많은|좋은)|최대\s*규모|최고\s*수준"
+)
+
+
+# 최상급이 **수준**이 아니라 **변화폭**에 붙은 경우입니다.
+#
+#     "매출이 가장 높은 성장을 보였다"
+#
+# 이것을 수준 비교로 다루면 엉뚱한 판정이 납니다. 전년 매출이 더 컸다는
+# 이유로 모순을 내면 안 됩니다. 주장은 매출 크기가 아니라 증가폭입니다.
+NOT_LEVEL_PATTERN = re.compile(
+    r"(최대|최고|최다|가장\s*(높은|큰|많은|좋은))\s*(의\s*)?(성장|증가|상승|하락|감소|감소폭|증가폭|낙폭)"
 )
 
 
@@ -49,6 +64,8 @@ def detect(text: str) -> str:
     if not target:
         return ""
     if not SUPERLATIVE_WORDS.search(target):
+        return ""
+    if NOT_LEVEL_PATTERN.search(target):
         return ""
     if HAS_NUMBER.search(target):
         return ""

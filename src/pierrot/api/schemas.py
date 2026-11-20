@@ -71,6 +71,15 @@ class VerifyResponse(BaseModel):
     annotated_answer: str = ""
     claims: list[dict[str, Any]]
     summary: dict[str, Any]
+    uncovered: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "주장이 하나도 나오지 않은 문장들. 분해 단계가 전망·권고를 "
+            "일부러 버리기 때문에 생깁니다. 버린 사실을 적지 않으면 읽는 "
+            "사람이 '검사를 통과한 문장'과 '아예 보지 않은 문장'을 구분할 "
+            "수 없습니다."
+        ),
+    )
     usage: UsageInfo
     extractor: dict[str, Any] = Field(
         default_factory=dict, description="분해 단계 정보(모델, 프롬프트 버전 등)."

@@ -179,6 +179,9 @@ def verify_numeric_claim(
     if query.conjunction:
         return _verify_conjunction(query, snapshot)
 
+    if query.delta is not None:
+        return _verify_delta(query, facts, snapshot)
+
     if query.equality:
         return _verify_equality(query, facts, snapshot)
 
@@ -932,5 +935,69 @@ def _verify_equality(
         observed=rates[0] if rates else None,
         unit="%",
         fs_explicit=bool(query.fs_div),
+        evidence=[_fact_line(current) for current, _ in pairs],
+    )
+
+
+# ---------------------------------------------------------------------------
+# 증감액 주장 — 증감률과는 단위가 다릅니다
+# ---------------------------------------------------------------------------
+
+
+def _verify_delta(
+    query: NumericQuery, facts: list[FinancialFact], snapshot: FinancialSnapshot
+) -> NumericVerification:
+    """'전년 대비 증가액은 1,000억 원이다' 처럼 증감 금액을 말한 주장."""
+    assert query.delta is not None
+    claimed = float(query.delta)
+    tolerance = tolerance_for(abs(claimed))
+
+    pairs = _growth_pairs(query, facts, snapshot)
+    if not pairs:
+        return NumericVerification(
+            Verdict.UNVERIFIABLE,
+            f"{_baseline_label(query)} 비교 대상 수치가 없어 증감액을 낼 수 없습니다",
+        )
+
+    observed: list[str] = []
+    matched: FinancialFact | None = None
+    failed: list[str] = []
+    for current, previous in pairs:
+        actual = current.amount - previous.amount
+        observed.append(f"{current.fs_label} {format_korean_amount(actual)}")
+        if intervals_overlap(
+            claimed - tolerance, claimed + tolerance, actual, actual
+        ):
+            if matched is None:
+                matched = current
+        else:
+            failed.append(current.fs_label)
+
+    first = pairs[0][0]
+    reason = (
+        f"{first.stock.name if first.stock else first.code} "
+        f"{first.bsns_year}년 {first.period_label} {first.account} "
+        f"{_baseline_label(query)} 실제 증감액 {' / '.join(observed)}, "
+        f"주장 {format_korean_amount(claimed)} "
+        f"(허용 오차 ±{format_korean_amount(tolerance)})"
+    )
+    mixed = _mixed_basis(query, matched, failed)
+    if matched is None:
+        reason += " -> 어느 기준과도 맞지 않습니다"
+    elif not query.fs_div:
+        reason += f" -> {matched.fs_label} 기준과 일치"
+        if mixed:
+            reason += f" (다만 {mixed} 기준과는 다릅니다)"
+
+    return NumericVerification(
+        verdict=Verdict.SUPPORTED if matched else Verdict.CONTRADICTED,
+        reason=reason,
+        claimed=claimed,
+        observed=float(pairs[0][0].amount - pairs[0][1].amount),
+        unit="원",
+        matched_fs=matched.fs_div if matched else "",
+        fs_explicit=bool(query.fs_div),
+        mixed_basis=mixed,
+        tolerance=tolerance,
         evidence=[_fact_line(current) for current, _ in pairs],
     )

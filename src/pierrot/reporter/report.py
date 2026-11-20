@@ -18,10 +18,12 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..extractor.models import Claim
+from ..extractor.quality import looks_like_forecast
 from ..verifier.state import Confidence, Route, VerificationResult, Verdict
 
 # 원문에 표시할 때 쓰는 기호. 터미널에서도 읽히도록 기호만 씁니다.
@@ -132,18 +134,50 @@ class Summary:
 
 
 @dataclass(frozen=True)
+class UncoveredSentence:
+    """주장이 하나도 나오지 않은 문장.
+
+    분해 단계는 전망·권고 문장을 **일부러 버립니다.** 지금 참·거짓을 가릴
+    수 없기 때문입니다. 그 자체는 옳지만, 버린 사실을 아무 데도 적지 않으면
+    읽는 사람은 그 문장이 **검사를 통과한 것인지 아예 보지 않은 것인지**
+    구분할 수 없습니다.
+
+    실측(가짜 데이터셋 06번):
+
+        "현대차의 2025년 연결 매출은 전년보다 증가했습니다.
+         2027년 연결 매출도 2026년보다 늘어날 전망입니다."
+
+    두 문장인데 주장은 하나만 나왔습니다. 두 번째 문장은 흔적도 없이
+    사라졌습니다. 검증기가 할 말은 "보지 않았다" 가 아니라
+    **"전망이라 지금은 가릴 수 없다"** 입니다.
+    """
+
+    text: str
+    start: int
+    end: int
+    why: str
+    """왜 주장이 안 나왔는지. '전망·권고로 보입니다' 또는 '분해되지 않았습니다'."""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"text": self.text, "start": self.start, "end": self.end, "why": self.why}
+
+
+@dataclass(frozen=True)
 class Report:
     """답변 하나에 대한 검증 보고서."""
 
     answer: str
     claims: list[ClaimReport]
     summary: Summary
+    uncovered: list[UncoveredSentence] = field(default_factory=list)
+    """주장이 하나도 나오지 않은 문장들. 비어 있으면 모든 문장이 다뤄졌습니다."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "answer": self.answer,
             "claims": [claim.to_dict() for claim in self.claims],
             "summary": self.summary.to_dict(),
+            "uncovered": [item.to_dict() for item in self.uncovered],
         }
 
     def annotated_answer(self, *, only_flagged: bool = True) -> str:
@@ -212,7 +246,60 @@ def build_report(
             )
         )
 
-    return Report(answer=answer, claims=reports, summary=summarize(results))
+    return Report(
+        answer=answer,
+        claims=reports,
+        summary=summarize(results),
+        uncovered=find_uncovered(answer, reports),
+    )
+
+
+# 문장 끝. 한국어 종결 부호 뒤에 공백이나 끝이 오는 자리에서 자릅니다.
+_SENTENCE_END = re.compile(r"(?<=[.!?。])\s+")
+
+
+def find_uncovered(answer: str, claims: list[ClaimReport]) -> list[UncoveredSentence]:
+    """주장이 하나도 걸치지 않은 문장을 찾습니다.
+
+    주장마다 원문 위치(start, end)가 붙어 있으므로, 어느 주장과도 겹치지
+    않는 문장은 **분해 단계가 버린 문장**입니다. 대부분 전망·권고입니다.
+
+    위치를 못 찾은 주장(span_found=False)이 하나라도 있으면 빈 목록을
+    돌려줍니다. 위치를 모르는 주장이 그 문장을 다뤘을 수도 있어, 다루지
+    않았다고 단정하면 거짓말이 되기 때문입니다.
+    """
+    text = answer or ""
+    if not text.strip():
+        return []
+    if any(claim.start is None or claim.end is None for claim in claims):
+        return []
+
+    spans = [(claim.start, claim.end) for claim in claims]
+
+    found: list[UncoveredSentence] = []
+    offset = 0
+    for piece in _SENTENCE_END.split(text):
+        start = text.find(piece, offset)
+        if start < 0:
+            start = offset
+        end = start + len(piece)
+        offset = end
+        if not piece.strip():
+            continue
+        covered = any(
+            claim_start < end and start < claim_end for claim_start, claim_end in spans
+        )
+        if covered:
+            continue
+        why = (
+            "전망·권고로 보입니다. 지금 참·거짓을 가릴 수 없습니다"
+            if looks_like_forecast(piece)
+            else "주장으로 분해되지 않았습니다"
+        )
+        found.append(
+            UncoveredSentence(text=piece.strip(), start=start, end=end, why=why)
+        )
+    return found
 
 
 def summarize(results: list[VerificationResult]) -> Summary:

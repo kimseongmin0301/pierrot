@@ -92,6 +92,7 @@ def main() -> int:
                 "label": label,
                 "text": text,
                 "claims": [claim.to_dict() for claim in report.claims],
+                "uncovered": [item.to_dict() for item in report.uncovered],
                 "summary": summary.to_dict(),
                 "cost_usd": usage.cost_usd,
             }
@@ -113,6 +114,11 @@ def main() -> int:
             print(f"    {index}. [{MARK[claim.verdict]:9}] ({claim.confidence}) {claim.route}")
             print(wrap(claim.text, "       주장: "))
             print(wrap(claim.reason, "       근거: "))
+        for item in report.uncovered:
+            # 주장이 안 나온 문장도 보여 줍니다. 아무 말도 안 하면 읽는
+            # 사람이 '통과한 문장'으로 오해합니다.
+            print(wrap(item.text, "    [다루지 않음] "))
+            print(wrap(item.why, "       사유: "))
 
     elapsed = time.time() - started
 

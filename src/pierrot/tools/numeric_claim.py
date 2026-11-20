@@ -22,6 +22,7 @@ from ..llm import get_openai_chat
 from .amounts import parse_korean_amount
 from .dart import ACCOUNT_ALIASES
 from .direction_rescue import find_claims, rescue
+from .delta_claim import detect as detect_delta
 from .equality_claim import detect as detect_equality
 from .range_claim import detect as detect_range
 from .superlative import detect as detect_superlative
@@ -267,6 +268,13 @@ class NumericQuery:
         -> 매출만 보고 '근거 있음'. 영업이익은 -7.7조에서 +23.5조로 늘었는데도.
     """
 
+    delta: int | None = None
+    """'증가액은 1,000억 원' 처럼 증감 **금액**을 말한 주장의 그 금액.
+
+    파서는 이것을 증감률로 읽어 "+1000%" 를 돌려줬습니다. 결론은 우연히
+    맞았지만 사유에 찍힌 숫자가 문장과 달라 읽는 사람이 신뢰할 수 없습니다.
+    """
+
     equality: str = ""
     """'전년과 같은 수준' 처럼 변화가 없다고 말한 주장이면 그 계정 이름.
 
@@ -355,6 +363,28 @@ def build_query(
         return NumericQuery(
             parsed.model_copy(update={"account": top, "quarter": 0}),
             stock, None, "", superlative=top,
+        )
+
+    # 증감액 주장도 **파서 결과보다 먼저** 봅니다.
+    #
+    # "증가액은 1,000억 원" 을 파서가 growth_percent=1000 으로 읽습니다.
+    # 증감액과 증감률은 단위가 아예 다릅니다.
+    found = detect_delta(claim_text)
+    if found:
+        account, delta = found
+        stock = find_stock(parsed.company)
+        if stock is None:
+            return NumericQuery(
+                parsed, None, None,
+                f"유니버스에 없는 종목입니다: {parsed.company or '(표기 없음)'}",
+            )
+        if not parsed.bsns_year or parsed.bsns_year < 1900:
+            return NumericQuery(parsed, stock, None, "사업연도를 특정할 수 없습니다")
+        return NumericQuery(
+            parsed.model_copy(
+                update={"is_financial_claim": True, "account": account}
+            ),
+            stock, None, "", delta=delta,
         )
 
     # 동등 주장도 **파서 결과보다 먼저** 봅니다.

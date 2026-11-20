@@ -141,6 +141,19 @@ def main() -> int:
         for line in claim.evidence[:2]:
             print(wrap(line, "          "))
 
+    # ---------------- 다루지 않은 문장 ----------------
+    if report.uncovered:
+        print()
+        print("=" * 100)
+        print(f"주장이 나오지 않은 문장  ({len(report.uncovered)}개)")
+        print("=" * 100)
+        print("  분해 단계가 전망·권고 문장을 일부러 버립니다. 버린 사실을 적지 않으면")
+        print("  읽는 사람이 '검사를 통과한 문장'으로 오해합니다.")
+        for item in report.uncovered:
+            print()
+            print(wrap(item.text, "  문장: "))
+            print(wrap(item.why, "  사유: "))
+
     # ---------------- 표시된 원문 ----------------
     print()
     print("=" * 100)

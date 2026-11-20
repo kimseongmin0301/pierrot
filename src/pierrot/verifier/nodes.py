@@ -150,6 +150,19 @@ _NOT_SEGMENT_MARKS = (
 )
 
 
+# 시도가 남겼지만 **아무것도 설명하지 못하는** 사유들입니다.
+# 최종 사유를 고를 때 건너뜁니다. 틀린 말은 아니지만, 읽는 사람이
+# "그래서 왜 확인을 못 했는가" 를 알 수 없습니다.
+_SAYS_NOTHING = (
+    "부문별 실적 주장이 아닙니다",
+    "판정 방법이 정해지지 않은 주장입니다",
+)
+
+
+def _says_nothing(reason: str) -> bool:
+    return (reason or "").strip() in _SAYS_NOTHING
+
+
 def _segment_hint(reason: str) -> dict[str, Any]:
     """재무 경로의 실패 사유를 보고 부문 경로로 넘길지 정합니다.
 
@@ -343,7 +356,22 @@ def make_finalize_node() -> NodeFn:
             # 그래서 도구 경로 중 **마지막** 것을 씁니다. 뒤로 갈수록
             # 더 좁혀 들어간 판단이기 때문입니다(재무 -> 부문).
             tool_attempts = [a for a in attempts if a["route"] != "NARRATIVE"]
-            chosen = tool_attempts[-1] if tool_attempts else attempts[0]
+            # 아무것도 말해 주지 않는 사유는 건너뜁니다.
+            #
+            # 부문 경로는 부문 주장이 아니면 "부문별 실적 주장이 아닙니다"
+            # 로 끝냅니다. 맞는 말이지만 **왜 확인 못 했는지는 하나도
+            # 설명하지 못합니다.** 그런데 마지막 시도라는 이유로 이 문구가
+            # 최종 사유로 남았습니다. 실측에서 3건이 이렇게 끝났습니다.
+            #
+            #   "삼성물산은 2027년 연간 실적에서 매출 목표를 달성했다"
+            #   -> 근거: "부문별 실적 주장이 아닙니다"
+            #
+            # 앞선 재무 경로의 사유가 훨씬 구체적입니다.
+            informative = [a for a in tool_attempts if not _says_nothing(a["reason"])]
+            if informative:
+                chosen = informative[-1]
+            else:
+                chosen = tool_attempts[-1] if tool_attempts else attempts[0]
         return {
             "verdict": chosen["verdict"],
             "reason": chosen["reason"],
