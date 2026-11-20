@@ -31,6 +31,7 @@ from .amounts import format_korean_amount
 from .financials import FinancialFact, FinancialSnapshot
 from .numeric_claim import Baseline, Direction, FinancialAssertion, NumericQuery
 from .tolerance import intervals_overlap, tolerance_for
+from .turnaround import LOSS, PROFIT, TO_LOSS, TO_PROFIT, needs_previous
 
 MIN_GROWTH_TOLERANCE_PP = 1.0
 MAX_GROWTH_TOLERANCE_PP = 10.0
@@ -176,6 +177,9 @@ def verify_numeric_claim(
 
     if query.conjunction:
         return _verify_conjunction(query, snapshot)
+
+    if query.turnaround:
+        return _verify_turnaround(query, facts, snapshot)
 
     if query.superlative:
         return _verify_superlative(query, snapshot)
@@ -597,4 +601,130 @@ def _verify_direction(
         fs_explicit=bool(query.fs_div),
         mixed_basis=mixed,
         evidence=[_fact_line(current) for current, _ in pairs],
+    )
+
+
+# ---------------------------------------------------------------------------
+# 부호 주장 — '흑자 전환' 은 증감이 아닙니다
+# ---------------------------------------------------------------------------
+
+_TURNAROUND_LABEL = {
+    TO_PROFIT: "흑자 전환",
+    TO_LOSS: "적자 전환",
+    PROFIT: "흑자",
+    LOSS: "적자",
+}
+
+
+def _sign_word(amount: int) -> str:
+    if amount > 0:
+        return "흑자"
+    if amount < 0:
+        return "적자"
+    return "손익 0"
+
+
+def _turnaround_miss(kind: str, current: int, previous: int | None) -> str:
+    """왜 전환/상태 주장이 틀렸는지 한 마디로 적습니다.
+
+    "방향이 맞지 않습니다" 로 뭉개면 읽는 사람이 무엇이 틀렸는지 모릅니다.
+    이미 흑자였던 것과 아직 적자인 것은 전혀 다른 이야기입니다.
+    """
+    if kind is TO_PROFIT:
+        if previous is not None and previous >= 0:
+            return "직전 기간이 이미 흑자였으므로 전환이 아닙니다"
+        return "현재가 흑자가 아닙니다"
+    if kind is TO_LOSS:
+        if previous is not None and previous <= 0:
+            return "직전 기간이 이미 적자였으므로 전환이 아닙니다"
+        return "현재가 적자가 아닙니다"
+    if kind is PROFIT:
+        return "실제로는 흑자가 아닙니다"
+    return "실제로는 적자가 아닙니다"
+
+
+def _verify_turnaround(
+    query: NumericQuery, facts: list[FinancialFact], snapshot: FinancialSnapshot
+) -> NumericVerification:
+    """'흑자로 전환됐다', '적자를 기록했다' 처럼 부호를 말한 주장.
+
+    증감으로 읽으면 안 됩니다. 늘어난 것과 흑자로 돌아선 것은 다릅니다.
+    카카오 2025년 연결 영업이익은 +4,602억에서 +7,320억으로 늘었지만
+    **2024년에 이미 흑자**였으므로 전환이 아닙니다.
+    """
+    kind = query.turnaround
+    label = _TURNAROUND_LABEL.get(kind, kind)
+
+    observed: list[str] = []
+    matched: FinancialFact | None = None
+    failed: list[str] = []
+    misses: list[str] = []
+
+    if needs_previous(kind):
+        pairs = _growth_pairs(query, facts, snapshot)
+        if not pairs:
+            return NumericVerification(
+                Verdict.UNVERIFIABLE,
+                f"{_baseline_label(query)} 비교 대상 수치가 없어 "
+                f"부호가 바뀌었는지 판단할 수 없습니다",
+            )
+        for current, previous in pairs:
+            if kind == TO_PROFIT:
+                ok = previous.amount < 0 < current.amount
+            else:
+                ok = previous.amount > 0 > current.amount
+            observed.append(
+                f"{current.fs_label} {format_korean_amount(previous.amount)}"
+                f"({_sign_word(previous.amount)}) -> "
+                f"{format_korean_amount(current.amount)}({_sign_word(current.amount)})"
+            )
+            if ok:
+                if matched is None:
+                    matched = current
+            else:
+                failed.append(current.fs_label)
+                misses.append(
+                    f"{current.fs_label}: "
+                    f"{_turnaround_miss(kind, current.amount, previous.amount)}"
+                )
+        first = pairs[0][0]
+        basis = f"{_baseline_label(query)} "
+    else:
+        for fact in facts:
+            ok = fact.amount > 0 if kind == PROFIT else fact.amount < 0
+            observed.append(
+                f"{fact.fs_label} {format_korean_amount(fact.amount)}"
+                f"({_sign_word(fact.amount)})"
+            )
+            if ok:
+                if matched is None:
+                    matched = fact
+            else:
+                failed.append(fact.fs_label)
+                misses.append(
+                    f"{fact.fs_label}: {_turnaround_miss(kind, fact.amount, None)}"
+                )
+        first = facts[0]
+        basis = ""
+
+    reason = (
+        f"{first.stock.name if first.stock else first.code} "
+        f"{first.bsns_year}년 {first.period_label} {first.account} "
+        f"{basis}{' / '.join(observed)}, 주장은 {label}"
+    )
+    mixed = _mixed_basis(query, matched, failed)
+    if matched is None:
+        reason += f" -> {'; '.join(dict.fromkeys(misses))}"
+    elif not query.fs_div:
+        reason += f" -> {matched.fs_label} 기준과 일치"
+        if mixed:
+            reason += f" (다만 {mixed} 기준으로는 {label}이 아닙니다)"
+
+    return NumericVerification(
+        verdict=Verdict.SUPPORTED if matched else Verdict.CONTRADICTED,
+        reason=reason,
+        matched_fs=matched.fs_div if matched else "",
+        fs_explicit=bool(query.fs_div),
+        mixed_basis=mixed,
+        evidence=[_fact_line(fact) for fact in facts],
     )

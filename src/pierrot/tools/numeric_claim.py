@@ -23,6 +23,7 @@ from .amounts import parse_korean_amount
 from .dart import ACCOUNT_ALIASES
 from .direction_rescue import find_claims, rescue
 from .superlative import detect as detect_superlative
+from .turnaround import detect as detect_turnaround
 from .universe import Stock, find_stock
 
 PARSER_VERSION = "v1"
@@ -264,6 +265,14 @@ class NumericQuery:
         -> 매출만 보고 '근거 있음'. 영업이익은 -7.7조에서 +23.5조로 늘었는데도.
     """
 
+    turnaround: str = ""
+    """부호 주장이면 그 종류(TO_PROFIT / TO_LOSS / PROFIT / LOSS).
+
+    '흑자 전환' 은 증감이 아니라 **부호가 바뀌었는지**에 대한 주장입니다.
+    증가로 읽으면 이미 흑자였던 해에도 통과합니다(실측 오탐). `turnaround`
+    를 보십시오.
+    """
+
     superlative: str = ""
     """최상급 주장('역대 최대 매출')이면 그 계정 이름.
 
@@ -327,6 +336,28 @@ def build_query(
         return NumericQuery(
             parsed.model_copy(update={"account": top, "quarter": 0}),
             stock, None, "", superlative=top,
+        )
+
+    # 부호 주장도 **파서 결과보다 먼저** 봅니다.
+    #
+    # "영업이익이 흑자로 전환됐다" 를 파서가 DIRECTION(UP) 으로 읽으면
+    # "늘었다" 만 확인하고 SUPPORTED 가 납니다. 이미 흑자였던 해에도
+    # 통과합니다. 최상급 주장과 같은 계열의 오탐입니다.
+    kind, account = detect_turnaround(claim_text)
+    if kind:
+        stock = find_stock(parsed.company)
+        if stock is None:
+            return NumericQuery(
+                parsed, None, None,
+                f"유니버스에 없는 종목입니다: {parsed.company or '(표기 없음)'}",
+            )
+        if not parsed.bsns_year or parsed.bsns_year < 1900:
+            return NumericQuery(parsed, stock, None, "사업연도를 특정할 수 없습니다")
+        return NumericQuery(
+            parsed.model_copy(
+                update={"is_financial_claim": True, "account": account}
+            ),
+            stock, None, "", turnaround=kind,
         )
 
     # 한 문장에 사실이 여럿이면 **전부** 확인해야 합니다.
