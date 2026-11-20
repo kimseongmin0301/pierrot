@@ -801,7 +801,7 @@ def _verify_range(
     if wrong:
         return NumericVerification(
             verdict=Verdict.CONTRADICTED,
-            reason=f"{head} -> {'; '.join(wrong)} 와 맞지 않습니다",
+            reason=f"{head} -> 실제와 맞지 않습니다. {'; '.join(wrong)}",
             claimed=float(end),
             observed=float(facts[0].amount),
             unit="원",
