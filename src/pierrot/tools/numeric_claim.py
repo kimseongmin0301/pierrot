@@ -22,6 +22,7 @@ from ..llm import get_openai_chat
 from .amounts import parse_korean_amount
 from .dart import ACCOUNT_ALIASES
 from .direction_rescue import find_claims, rescue
+from .range_claim import detect as detect_range
 from .superlative import detect as detect_superlative
 from .turnaround import detect as detect_turnaround
 from .universe import Stock, find_stock
@@ -265,6 +266,15 @@ class NumericQuery:
         -> 매출만 보고 '근거 있음'. 영업이익은 -7.7조에서 +23.5조로 늘었는데도.
     """
 
+    value_range: tuple[int, int] | None = None
+    """'2조 원에서 3조 원으로' 처럼 양 끝을 말한 주장의 (시작값, 끝값).
+
+    숫자가 둘인 문장이 방향 주장으로 떨어지면 **적힌 숫자를 통째로 무시**
+    하게 됩니다. 실제로 그랬습니다. LG에너지솔루션 연결 영업이익은
+    5,753억에서 1조 3,461억으로 늘었는데 "2조에서 3조로 늘었다" 가
+    '근거 있음' 으로 통과했습니다.
+    """
+
     turnaround: str = ""
     """부호 주장이면 그 종류(TO_PROFIT / TO_LOSS / PROFIT / LOSS).
 
@@ -336,6 +346,31 @@ def build_query(
         return NumericQuery(
             parsed.model_copy(update={"account": top, "quarter": 0}),
             stock, None, "", superlative=top,
+        )
+
+    # 숫자가 둘인 문장은 **파서 결과보다 먼저** 집습니다.
+    #
+    # "2조 원에서 3조 원으로 늘었다" 를 파서가 DIRECTION 으로 읽으면
+    # 방향만 보고 통과시킵니다. 적힌 숫자 둘을 아무것도 확인하지 않습니다.
+    # 같은 문형을 실행마다 다르게 읽으므로 파이썬이 먼저 막습니다.
+    span = detect_range(claim_text)
+    if span:
+        stock = find_stock(parsed.company)
+        if stock is None:
+            return NumericQuery(
+                parsed, None, None,
+                f"유니버스에 없는 종목입니다: {parsed.company or '(표기 없음)'}",
+            )
+        if not parsed.bsns_year or parsed.bsns_year < 1900:
+            return NumericQuery(parsed, stock, None, "사업연도를 특정할 수 없습니다")
+        if parsed.account not in KNOWN_ACCOUNTS:
+            return NumericQuery(
+                parsed, stock, None,
+                f"다룰 수 없는 계정입니다: {parsed.account or '(표기 없음)'}",
+            )
+        return NumericQuery(
+            parsed.model_copy(update={"is_financial_claim": True}),
+            stock, None, "", value_range=span,
         )
 
     # 부호 주장도 **파서 결과보다 먼저** 봅니다.

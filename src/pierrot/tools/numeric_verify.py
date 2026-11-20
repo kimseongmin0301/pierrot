@@ -178,6 +178,9 @@ def verify_numeric_claim(
     if query.conjunction:
         return _verify_conjunction(query, snapshot)
 
+    if query.value_range:
+        return _verify_range(query, facts, snapshot)
+
     if query.turnaround:
         return _verify_turnaround(query, facts, snapshot)
 
@@ -727,4 +730,103 @@ def _verify_turnaround(
         fs_explicit=bool(query.fs_div),
         mixed_basis=mixed,
         evidence=[_fact_line(fact) for fact in facts],
+    )
+
+
+# ---------------------------------------------------------------------------
+# 범위 주장 — 양 끝을 둘 다 봅니다
+# ---------------------------------------------------------------------------
+
+
+def _match_amount(claimed: int, facts: list[FinancialFact]) -> FinancialFact | None:
+    """허용 오차 안에서 맞는 수치를 찾습니다. 없으면 None."""
+    tolerance = tolerance_for(float(claimed))
+    for fact in facts:
+        if intervals_overlap(
+            claimed - tolerance, claimed + tolerance, fact.amount, fact.amount
+        ):
+            return fact
+    return None
+
+
+def _verify_range(
+    query: NumericQuery, facts: list[FinancialFact], snapshot: FinancialSnapshot
+) -> NumericVerification:
+    """'2조 원에서 3조 원으로 늘었다' 처럼 양 끝을 말한 주장.
+
+    끝값만 보면 시작값에 적힌 거짓이 통과합니다. 그래서 **둘 다** 봅니다.
+    비교 기준 기간 수치가 없으면 끝값만 보되, 사유에 그렇다고 적습니다.
+
+    전에는 이런 문장이 방향 주장으로 떨어져 **적힌 숫자를 통째로 무시**
+    했습니다. LG에너지솔루션 연결 영업이익은 5,753억에서 1조 3,461억으로
+    늘었는데 "2조에서 3조로 늘었다" 가 '근거 있음' 으로 통과했습니다.
+    """
+    assert query.value_range is not None
+    assert query.stock is not None
+    start, end = query.value_range
+
+    end_match = _match_amount(end, facts)
+    observed_end = " / ".join(
+        f"{fact.fs_label} {format_korean_amount(fact.amount)}" for fact in facts
+    )
+
+    pairs = _growth_pairs(query, facts, snapshot)
+    previous = [previous_fact for _, previous_fact in pairs]
+    start_match = _match_amount(start, previous) if previous else None
+
+    head = (
+        f"{facts[0].stock.name if facts[0].stock else facts[0].code} "
+        f"{facts[0].bsns_year}년 {facts[0].period_label} {facts[0].account} "
+        f"주장 {format_korean_amount(start)} -> {format_korean_amount(end)}"
+    )
+
+    wrong: list[str] = []
+    if end_match is None:
+        wrong.append(f"끝값: 실제 {observed_end}")
+    if previous and start_match is None:
+        observed_start = " / ".join(
+            f"{fact.fs_label} {format_korean_amount(fact.amount)}" for fact in previous
+        )
+        wrong.append(
+            f"시작값({_baseline_label(query)} 기준): 실제 {observed_start}"
+        )
+
+    if wrong:
+        return NumericVerification(
+            verdict=Verdict.CONTRADICTED,
+            reason=f"{head} -> {'; '.join(wrong)} 와 맞지 않습니다",
+            claimed=float(end),
+            observed=float(facts[0].amount),
+            unit="원",
+            fs_explicit=bool(query.fs_div),
+            evidence=[_fact_line(fact) for fact in facts + previous],
+        )
+
+    if not previous:
+        # 끝값만 확인했습니다. 시작값을 못 본 채 '근거 있음' 이라고 하면
+        # 확인하지 않은 것을 확인했다고 말하는 셈입니다.
+        return NumericVerification(
+            verdict=Verdict.UNVERIFIABLE,
+            reason=(
+                f"{head} -> 끝값은 실제 {observed_end} 와 맞지만, "
+                f"{_baseline_label(query)} 수치가 없어 시작값을 확인하지 못했습니다"
+            ),
+            fs_explicit=bool(query.fs_div),
+            evidence=[_fact_line(fact) for fact in facts],
+        )
+
+    return NumericVerification(
+        verdict=Verdict.SUPPORTED,
+        reason=(
+            f"{head} -> 시작값 {start_match.fs_label} "
+            f"{format_korean_amount(start_match.amount)}, "
+            f"끝값 {end_match.fs_label} {format_korean_amount(end_match.amount)} "
+            f"둘 다 맞습니다"
+        ),
+        claimed=float(end),
+        observed=float(end_match.amount),
+        unit="원",
+        matched_fs=end_match.fs_div,
+        fs_explicit=bool(query.fs_div),
+        evidence=[_fact_line(fact) for fact in facts + previous],
     )
