@@ -133,7 +133,7 @@ AI 답변  "삼성전자 3분기 영업이익은 6조 1,879억 원이고, 주가
 오탐이었고, 셋은 사유가 뭉개져 "왜 못 봤는지" 알 수 없게 만드는 문제였습니다.
 아래 [측정이 잡아낸 오류들](#측정이-잡아낸-오류들)에 있습니다.
 
-**[→ 전체 측정 결과 보기](https://claude.ai/code/artifact/8c164260-8edc-4a60-a1ff-34aef35e8e3a)**
+**[→ 전체 측정 결과 보기](https://kimseongmin.co.kr/portfolio/pierrot.html)**
 — 비교표 전체, 베이스라인이 무너지는 지점, 측정이 잡아낸 오류들
 
 ---
@@ -400,7 +400,7 @@ LangGraph 상태 머신입니다. 문장 쪼개기 단계가 붙인 유형을 �
 | 5 | 커버리지 개선 | 부문별 매출 + 배당·지배주주순이익 |
 | 6 | 쪼개기 품질 | 시점 없음 33.0% → 4.3% |
 | 7 | FastAPI 서빙 | 응답마다 비용·지연 기록 |
-| 8 | 결과 정리 | [측정 결과 페이지](https://claude.ai/code/artifact/8c164260-8edc-4a60-a1ff-34aef35e8e3a) |
+| 8 | 결과 정리 | [측정 결과 페이지](https://kimseongmin.co.kr/portfolio/pierrot.html) |
 | 9~13 | 실사용에서 나온 결함 수정 | 인과 · 최상급 · 한 문장 여러 사실 오탐 차단 |
 | 14 | 함정 20건으로 시험 | 오탐 2건 제거, 놓침 2건 회수, 사유 4종 교정 |
 
@@ -475,6 +475,6 @@ scripts/run_api.py                 # API 서버
 
 ## 문서
 
-- **[측정 결과 페이지](https://claude.ai/code/artifact/8c164260-8edc-4a60-a1ff-34aef35e8e3a)** — 전체 지표, 베이스라인 비교, 잡아낸 오류들
+- **[측정 결과 페이지](https://kimseongmin.co.kr/portfolio/pierrot.html)** — 전체 지표, 베이스라인 비교, 잡아낸 오류들
 - [설계 문서 (docs/plan.md)](docs/plan.md) — 배경, 모듈 구성, 평가 설계, 기술 선택 근거,
   단계별 측정 기록

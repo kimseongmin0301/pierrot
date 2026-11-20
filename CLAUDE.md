@@ -93,7 +93,7 @@ LLM 답변을 검증 가능한 주장(claim) 단위로 분해하고, 근거 문�
       API 테스트 16개 포함 417개 통과
 - [x] 8단계: 결과 페이지 정리 (2026-11-19)
       0~7단계 측정 결과를 한 페이지로. build/results.html
-      https://claude.ai/code/artifact/8c164260-8edc-4a60-a1ff-34aef35e8e3a
+      https://kimseongmin.co.kr/portfolio/pierrot.html
 - [x] 9단계: 실사용에서 나온 결함 수정 (2026-11-19)
       - [x] 재무 스냅샷을 2022년부터 수집 (증감 계산의 기준 해)
             2023년부터 받으면 '2023년에 매출이 증가했다' 류를 판정 못 함
