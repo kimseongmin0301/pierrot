@@ -162,6 +162,9 @@ def verify_numeric_claim(
     if problem:
         return NumericVerification(Verdict.UNVERIFIABLE, problem)
 
+    if not facts and query.superlative:
+        return _verify_superlative(query, snapshot)
+
     period = "연간" if query.parsed.quarter == 0 else f"{query.parsed.quarter}분기"
     if not facts:
         return NumericVerification(
@@ -171,6 +174,9 @@ def verify_numeric_claim(
             f"{' (' + query.parsed.fs_hint + ' 기준)' if query.fs_div else ''}",
         )
 
+    if query.superlative:
+        return _verify_superlative(query, snapshot)
+
     assertion = query.parsed.assertion
     if assertion is FinancialAssertion.AMOUNT:
         return _verify_amount(query, facts)
@@ -179,6 +185,85 @@ def verify_numeric_claim(
     if assertion is FinancialAssertion.DIRECTION:
         return _verify_direction(query, facts, snapshot)
     return NumericVerification(Verdict.UNVERIFIABLE, "판정 방법이 정해지지 않은 주장입니다")
+
+
+def _verify_superlative(
+    query: NumericQuery, snapshot: FinancialSnapshot
+) -> NumericVerification:
+    """'역대 최대 매출' 같은 최상급 주장.
+
+    증명과 반증의 난이도가 다릅니다.
+
+      증명 — 전체 이력이 필요합니다. 수집 범위가 2022년부터이므로
+             그 이전을 모르는 한 "역대" 를 확정할 수 없습니다.
+      반증 — **한 건이면 충분합니다.** 범위 안에 더 큰 해가 있으면
+             그 주장은 확실히 거짓입니다.
+
+    그래서 반증되면 CONTRADICTED, 아니면 UNVERIFIABLE 로 두되
+    **무엇이 없어서 못 보는지**를 사유에 적습니다.
+    """
+    assert query.stock is not None
+    code = query.stock.code
+    account = query.superlative
+    year = query.parsed.bsns_year
+    name = query.stock.name
+
+    current = snapshot.lookup(code, year, account, quarter=0, fs_div="CFS")
+    if not current:
+        # 그 해 연간이 아직 공시되지 않았습니다. 몇 분기까지 있는지 알려 줍니다.
+        quarters = [
+            q for q in (1, 2, 3)
+            if snapshot.lookup(code, year, account, quarter=q, fs_div="CFS")
+        ]
+        detail = (
+            f"{quarters[-1]}분기까지만 공시되어 있습니다"
+            if quarters
+            else "해당 연도 수치가 없습니다"
+        )
+        return NumericVerification(
+            Verdict.UNVERIFIABLE,
+            f"{name} {year}년 연간 {account}이 아직 공시되지 않아 "
+            f"'역대 최대'를 판정할 수 없습니다 ({detail}).",
+        )
+
+    value = current[0].amount
+    years = sorted(y for y in snapshot.years(code) if y < year)
+    bigger = []
+    for past in years:
+        facts = snapshot.lookup(code, past, account, quarter=0, fs_div="CFS")
+        if facts and facts[0].amount >= value:
+            bigger.append((past, facts[0].amount))
+
+    history = ", ".join(
+        f"{past}년 {format_korean_amount(snapshot.lookup(code, past, account, quarter=0, fs_div='CFS')[0].amount)}"
+        for past in years
+        if snapshot.lookup(code, past, account, quarter=0, fs_div="CFS")
+    )
+
+    if bigger:
+        past, amount = max(bigger, key=lambda item: item[1])
+        return NumericVerification(
+            Verdict.CONTRADICTED,
+            f"{name} {year}년 {account} {format_korean_amount(value)}보다 "
+            f"{past}년 {format_korean_amount(amount)}이 더 큽니다. "
+            f"'역대 최대'가 아닙니다. (비교한 해: {history})",
+            claimed=None,
+            observed=float(amount),
+            unit="원",
+            evidence=[_fact_line(current[0])],
+        )
+
+    first = years[0] if years else year
+    return NumericVerification(
+        Verdict.UNVERIFIABLE,
+        f"{name} {year}년 {account} {format_korean_amount(value)}은 "
+        f"수집 범위({first}년~) 안에서는 가장 큽니다. 다만 그 이전 수치를 "
+        f"가지고 있지 않아 '역대 최대'인지는 확정할 수 없습니다. "
+        f"(비교한 해: {history})",
+        observed=float(value),
+        unit="원",
+        evidence=[_fact_line(current[0])],
+    )
 
 
 def _verify_amount(query: NumericQuery, facts: list[FinancialFact]) -> NumericVerification:

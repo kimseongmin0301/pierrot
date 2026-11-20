@@ -146,6 +146,19 @@ class FinancialSnapshot:
     def accounts(self) -> list[str]:
         return sorted(self._frame["account"].unique())
 
+    def years(self, code: str | None = None) -> list[int]:
+        """수집된 사업연도 목록. 종목을 주면 그 종목 기준입니다.
+
+        '역대 최대' 같은 최상급 주장을 판정할 때, 비교할 수 있는 해가
+        어디까지인지 알아야 사유를 정확히 적을 수 있습니다.
+        """
+        frame = self._frame
+        if code is not None:
+            frame = frame[frame["code"] == code]
+        if frame.empty:
+            return []
+        return sorted(int(year) for year in frame["bsns_year"].unique())
+
     def year_range(self) -> tuple[int, int] | None:
         if self._frame.empty:
             return None

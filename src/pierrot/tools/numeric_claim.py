@@ -22,6 +22,7 @@ from ..llm import get_openai_chat
 from .amounts import parse_korean_amount
 from .dart import ACCOUNT_ALIASES
 from .direction_rescue import rescue
+from .superlative import detect as detect_superlative
 from .universe import Stock, find_stock
 
 PARSER_VERSION = "v1"
@@ -253,6 +254,14 @@ class NumericQuery:
     unresolved: str
     """조회 조건을 만들지 못한 이유. 만들었으면 빈 문자열."""
 
+    superlative: str = ""
+    """최상급 주장('역대 최대 매출')이면 그 계정 이름.
+
+    LLM 출력 스키마에는 넣지 않았습니다. 스키마를 바꾸면 캐시가 전부
+    무효가 되고 4단계 지표를 다시 재야 합니다. 이건 파이썬이 문장을 보고
+    판정할 수 있는 일이라 여기서 채웁니다(`superlative.detect`).
+    """
+
     @property
     def is_resolved(self) -> bool:
         return not self.unresolved
@@ -289,6 +298,27 @@ def build_query(
         claim_text: 원래 주장 문장. 파서가 방향 주장을 OTHER 로 버렸을 때
             파이썬이 다시 보기 위해 받습니다(`direction_rescue`).
     """
+    # 최상급 주장을 **파서 결과보다 먼저** 봅니다.
+    #
+    # "2023년 역대 최대 영업이익을 기록했다" 를 파서가 DIRECTION 으로 읽으면
+    # "영업이익이 늘었다" 만 확인하고 SUPPORTED 가 납니다. 늘어난 것은 맞지만
+    # **역대 최대인지는 아무것도 확인하지 않았습니다.** 인과 주장을 방향으로
+    # 읽어 거짓 '근거 있음' 이 났던 것과 같은 종류입니다.
+    top = detect_superlative(claim_text)
+    if top:
+        stock = find_stock(parsed.company)
+        if stock is None:
+            return NumericQuery(
+                parsed, None, None,
+                f"유니버스에 없는 종목입니다: {parsed.company or '(표기 없음)'}",
+            )
+        if not parsed.bsns_year or parsed.bsns_year < 1900:
+            return NumericQuery(parsed, stock, None, "사업연도를 특정할 수 없습니다")
+        return NumericQuery(
+            parsed.model_copy(update={"account": top, "quarter": 0}),
+            stock, None, "", superlative=top,
+        )
+
     if not parsed.is_financial_claim or parsed.assertion is FinancialAssertion.OTHER:
         # 수치 없는 방향 주장을 파이썬이 건져 냅니다.
         #
