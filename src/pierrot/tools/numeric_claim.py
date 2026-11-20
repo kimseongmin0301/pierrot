@@ -21,6 +21,7 @@ from ..config import Settings, get_settings
 from ..llm import get_openai_chat
 from .amounts import parse_korean_amount
 from .dart import ACCOUNT_ALIASES
+from .direction_rescue import rescue
 from .universe import Stock, find_stock
 
 PARSER_VERSION = "v1"
@@ -160,6 +161,8 @@ SYSTEM_PROMPT = f"""당신은 기업 재무에 대한 주장을 조회 조건으
      당기순이익과는 **다른 값**입니다(비지배지분이 빠짐). 묶지 마십시오.
    - "배당금 총액", "배당금 지급액", "현금배당금" -> 배당금총액
    - "주당 배당금", "주당 현금배당금", "DPS" -> 주당배당금
+   - "주당순이익", "EPS" -> 주당순이익
+     당기순이익과 **다른 값**입니다(주식 수로 나눈 것). 묶지 마십시오.
    - 목록에 없으면 account 를 빈 문자열로 두고 assertion 을 OTHER 로 하십시오.
 
 5. 재무제표 주요계정에 없는 것은 OTHER 입니다.
@@ -173,6 +176,13 @@ SYSTEM_PROMPT = f"""당신은 기업 재무에 대한 주장을 조회 조건으
 
    다만 **수치가 없다는 이유만으로 OTHER 로 두지 마십시오.**
    회사 **전체**의 계정과 기간을 알 수 있으면 DIRECTION 으로 판정할 수 있습니다.
+
+   아래는 전부 DIRECTION 입니다. "구체적인 수치가 없다" 는 OTHER 의 사유가
+   되지 못합니다. 방향은 전년 수치와 대조해 가릴 수 있기 때문입니다.
+     "매출이 대폭 증가하였다"      "매출이 지속적으로 상승하였다"
+     "영업이익이 흑자로 전환되었다"  "순이익이 적자를 기록하였다"
+     "EPS 가 크게 증가하였다"      "실적이 개선되었다"(계정을 알 수 있을 때)
+   꾸밈말(대폭·크게·지속적으로·우수하게)은 **방향을 바꾸지 않습니다.** 무시하십시오.
    - "영업이익 증가폭이 크게 나타났다" -> account=영업이익, DIRECTION, UP
    - "매출이 우수하게 증가하였다"       -> account=매출액, DIRECTION, UP
    - "순이익이 좋은 성장세를 보였다"     -> account=당기순이익, DIRECTION, UP
@@ -270,11 +280,37 @@ class NumericQuery:
         )
 
 
-def build_query(parsed: ParsedNumericClaim) -> NumericQuery:
-    """파싱 결과를 조회 조건으로 확정합니다."""
+def build_query(
+    parsed: ParsedNumericClaim, *, claim_text: str = ""
+) -> NumericQuery:
+    """파싱 결과를 조회 조건으로 확정합니다.
+
+    Args:
+        claim_text: 원래 주장 문장. 파서가 방향 주장을 OTHER 로 버렸을 때
+            파이썬이 다시 보기 위해 받습니다(`direction_rescue`).
+    """
     if not parsed.is_financial_claim or parsed.assertion is FinancialAssertion.OTHER:
-        reason = parsed.note or "재무제표 조회로 확인할 수 있는 주장이 아닙니다"
-        return NumericQuery(parsed, None, None, reason)
+        # 수치 없는 방향 주장을 파이썬이 건져 냅니다.
+        #
+        # 파서가 "구체적인 수치가 없다" 며 OTHER 로 버리는 일이 반복됩니다.
+        # 프롬프트로 여러 번 막아 봤지만 일관되지 않습니다. 같은 형태인데
+        # 하나는 통과하고 하나는 버려집니다. 그래서 검사로 바꿨습니다.
+        account, direction = rescue(claim_text)
+        if account and direction:
+            parsed = parsed.model_copy(
+                update={
+                    "is_financial_claim": True,
+                    "account": account,
+                    "assertion": FinancialAssertion.DIRECTION,
+                    "direction": Direction(direction),
+                    "amount_text": "",
+                    "growth_percent": 0.0,
+                    "note": (parsed.note or "") + " [파이썬이 방향 주장으로 되살림]",
+                }
+            )
+        else:
+            reason = parsed.note or "재무제표 조회로 확인할 수 있는 주장이 아닙니다"
+            return NumericQuery(parsed, None, None, reason)
 
     stock = find_stock(parsed.company)
     if stock is None:
@@ -342,4 +378,4 @@ def parse_numeric_claim(
     )
     if isinstance(parsed, dict):
         parsed = ParsedNumericClaim.model_validate(parsed)
-    return build_query(parsed)
+    return build_query(parsed, claim_text=claim_text)
