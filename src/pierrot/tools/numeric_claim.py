@@ -22,6 +22,7 @@ from ..llm import get_openai_chat
 from .amounts import parse_korean_amount
 from .dart import ACCOUNT_ALIASES
 from .direction_rescue import find_claims, rescue
+from .equality_claim import detect as detect_equality
 from .range_claim import detect as detect_range
 from .superlative import detect as detect_superlative
 from .turnaround import detect as detect_turnaround
@@ -266,6 +267,14 @@ class NumericQuery:
         -> 매출만 보고 '근거 있음'. 영업이익은 -7.7조에서 +23.5조로 늘었는데도.
     """
 
+    equality: str = ""
+    """'전년과 같은 수준' 처럼 변화가 없다고 말한 주장이면 그 계정 이름.
+
+    전에는 전부 "증감 방향이 분명하지 않습니다" 로 흘러갔습니다. 같다는
+    것도 주장입니다. SKT 2026년 2분기 순이익은 +488% 변했는데도
+    "전년 동기와 같았습니다" 가 확인 불가로 빠져나갔습니다.
+    """
+
     value_range: tuple[int, int] | None = None
     """'2조 원에서 3조 원으로' 처럼 양 끝을 말한 주장의 (시작값, 끝값).
 
@@ -346,6 +355,28 @@ def build_query(
         return NumericQuery(
             parsed.model_copy(update={"account": top, "quarter": 0}),
             stock, None, "", superlative=top,
+        )
+
+    # 동등 주장도 **파서 결과보다 먼저** 봅니다.
+    #
+    # 파서는 '같은 수준' 에 direction=NONE 을 돌려줍니다. 그러면 판정기가
+    # "증감 방향이 분명하지 않습니다" 로 끝냅니다. 방향이 없는 것이 아니라
+    # **변화가 없다고 주장한 것**입니다. 확인할 수 있습니다.
+    same = detect_equality(claim_text)
+    if same:
+        stock = find_stock(parsed.company)
+        if stock is None:
+            return NumericQuery(
+                parsed, None, None,
+                f"유니버스에 없는 종목입니다: {parsed.company or '(표기 없음)'}",
+            )
+        if not parsed.bsns_year or parsed.bsns_year < 1900:
+            return NumericQuery(parsed, stock, None, "사업연도를 특정할 수 없습니다")
+        return NumericQuery(
+            parsed.model_copy(
+                update={"is_financial_claim": True, "account": same}
+            ),
+            stock, None, "", equality=same,
         )
 
     # 숫자가 둘인 문장은 **파서 결과보다 먼저** 집습니다.

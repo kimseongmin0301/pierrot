@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .amounts import format_korean_amount
+from .equality_claim import CLEARLY_DIFFERENT_PCT, SAME_TOLERANCE_PCT
 from .financials import FinancialFact, FinancialSnapshot
 from .numeric_claim import Baseline, Direction, FinancialAssertion, NumericQuery
 from .tolerance import intervals_overlap, tolerance_for
@@ -177,6 +178,9 @@ def verify_numeric_claim(
 
     if query.conjunction:
         return _verify_conjunction(query, snapshot)
+
+    if query.equality:
+        return _verify_equality(query, facts, snapshot)
 
     if query.value_range:
         return _verify_range(query, facts, snapshot)
@@ -829,4 +833,104 @@ def _verify_range(
         matched_fs=end_match.fs_div,
         fs_explicit=bool(query.fs_div),
         evidence=[_fact_line(fact) for fact in facts + previous],
+    )
+
+
+# ---------------------------------------------------------------------------
+# 동등 주장 — '같다' 도 확인할 수 있는 주장입니다
+# ---------------------------------------------------------------------------
+
+
+def _verify_equality(
+    query: NumericQuery, facts: list[FinancialFact], snapshot: FinancialSnapshot
+) -> NumericVerification:
+    """'전년과 같은 수준이다' 처럼 변화가 없다고 말한 주장.
+
+    '같은 수준' 에는 정확한 경계가 없으므로 구간을 셋으로 나눕니다.
+    가운데(애매한 구간)는 억지로 한쪽으로 몰지 않고 실제 변동률을 적어
+    둡니다. "증감 방향이 분명하지 않습니다" 보다 훨씬 쓸모 있습니다.
+    """
+    pairs = _growth_pairs(query, facts, snapshot)
+    if not pairs:
+        return NumericVerification(
+            Verdict.UNVERIFIABLE,
+            f"{_baseline_label(query)} 비교 대상 수치가 없어 "
+            f"변화가 없었는지 판단할 수 없습니다",
+        )
+
+    observed: list[str] = []
+    rates: list[float] = []
+    matched: FinancialFact | None = None
+    failed: list[str] = []
+    unclear = False
+
+    for current, previous in pairs:
+        if previous.amount == 0:
+            unclear = True
+            observed.append(f"{current.fs_label} 직전 수치가 0이라 변동률을 낼 수 없음")
+            continue
+        rate = (current.amount - previous.amount) / abs(previous.amount) * 100
+        rates.append(rate)
+        observed.append(
+            f"{current.fs_label} {format_korean_amount(previous.amount)} -> "
+            f"{format_korean_amount(current.amount)} ({rate:+.1f}%)"
+        )
+        if abs(rate) <= SAME_TOLERANCE_PCT:
+            if matched is None:
+                matched = current
+        elif abs(rate) > CLEARLY_DIFFERENT_PCT:
+            failed.append(current.fs_label)
+        else:
+            unclear = True
+
+    first = pairs[0][0]
+    head = (
+        f"{first.stock.name if first.stock else first.code} "
+        f"{first.bsns_year}년 {first.period_label} {first.account} "
+        f"{_baseline_label(query)} {' / '.join(observed)}, "
+        f"주장은 '같은 수준'"
+    )
+
+    if matched is not None:
+        mixed = _mixed_basis(query, matched, failed)
+        reason = f"{head} -> 변동률이 ±{SAME_TOLERANCE_PCT:.0f}% 안쪽입니다"
+        if mixed:
+            reason += f" (다만 {mixed} 기준으로는 그렇지 않습니다)"
+        return NumericVerification(
+            verdict=Verdict.SUPPORTED,
+            reason=reason,
+            observed=rates[0] if rates else None,
+            unit="%",
+            matched_fs=matched.fs_div,
+            fs_explicit=bool(query.fs_div),
+            mixed_basis=mixed,
+            evidence=[_fact_line(current) for current, _ in pairs],
+        )
+
+    if unclear:
+        # 억지로 한쪽으로 몰지 않습니다. 실제 변동률을 적어 두면 읽는
+        # 사람이 직접 판단할 수 있습니다.
+        return NumericVerification(
+            verdict=Verdict.UNVERIFIABLE,
+            reason=(
+                f"{head} -> ±{SAME_TOLERANCE_PCT:.0f}% 와 "
+                f"±{CLEARLY_DIFFERENT_PCT:.0f}% 사이여서 "
+                f"'같은 수준'인지 가르기 어렵습니다"
+            ),
+            observed=rates[0] if rates else None,
+            unit="%",
+            fs_explicit=bool(query.fs_div),
+            evidence=[_fact_line(current) for current, _ in pairs],
+        )
+
+    return NumericVerification(
+        verdict=Verdict.CONTRADICTED,
+        reason=(
+            f"{head} -> 변동률이 ±{CLEARLY_DIFFERENT_PCT:.0f}% 를 넘으므로 "
+            f"같은 수준이라 할 수 없습니다"
+        ),
+        observed=rates[0] if rates else None,
+        unit="%",
+        fs_explicit=bool(query.fs_div),
+        evidence=[_fact_line(current) for current, _ in pairs],
     )
