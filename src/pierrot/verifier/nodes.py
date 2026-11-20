@@ -120,6 +120,7 @@ def make_numeric_node(tools: VerifierTools) -> NodeFn:
             "tolerance": result.tolerance,
             "matched_fs": result.matched_fs,
             "fs_explicit": result.fs_explicit,
+            "mixed_basis": result.mixed_basis,
             "query": query.describe(),
         }
         update = _done(

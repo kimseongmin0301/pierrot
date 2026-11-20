@@ -65,8 +65,34 @@ class NumericVerification:
     fs_explicit: bool = False
     """주장이 연결/별도를 직접 밝혔는지. False 면 둘 다 보고 판정한 것입니다."""
 
+    mixed_basis: str = ""
+    """연결과 별도가 엇갈렸을 때 맞지 않은 쪽. 비어 있으면 엇갈리지 않았습니다.
+
+    기준을 밝히지 않은 주장은 둘 중 하나라도 맞으면 인정합니다. 그 편이
+    오탐을 막기 때문입니다. 하지만 **한쪽만 맞았다는 사실 자체가 정보**입니다.
+
+        현대차 2026년 2분기 당기순이익
+          연결 3조 2,503억 -> 2조 8,879억 (감소)
+          별도 1조 3,513억 -> 3조   344억 (증가)   <- 주장과 일치
+
+    "순이익이 증가했다" 는 별도 기준으로만 맞습니다. 보통 '현대차 순이익' 은
+    연결을 가리키므로, 읽는 사람이 이 차이를 알아야 합니다.
+    """
+
     tolerance: float = 0.0
     evidence: list[str] = field(default_factory=list)
+
+
+def _mixed_basis(
+    query: NumericQuery, matched: FinancialFact | None, failed: list[str]
+) -> str:
+    """연결·별도가 엇갈렸으면 맞지 않은 쪽의 이름을 돌려줍니다.
+
+    주장이 기준을 직접 밝혔으면 엇갈릴 일이 없으므로 빈 문자열입니다.
+    """
+    if query.fs_div or matched is None or not failed:
+        return ""
+    return ", ".join(dict.fromkeys(failed))
 
 
 def _fact_line(fact: FinancialFact) -> str:
@@ -162,12 +188,15 @@ def _verify_amount(query: NumericQuery, facts: list[FinancialFact]) -> NumericVe
     tolerance = tolerance_for(claimed)
 
     matched: FinancialFact | None = None
+    failed: list[str] = []
     for fact in facts:
         if intervals_overlap(
             claimed - tolerance, claimed + tolerance, fact.amount, fact.amount
         ):
-            matched = fact
-            break
+            if matched is None:
+                matched = fact
+        else:
+            failed.append(fact.fs_label)
 
     observed_text = " / ".join(
         f"{fact.fs_label} {format_korean_amount(fact.amount)}" for fact in facts
@@ -178,10 +207,13 @@ def _verify_amount(query: NumericQuery, facts: list[FinancialFact]) -> NumericVe
         f"실제 {observed_text}, 주장 {format_korean_amount(claimed)} "
         f"(허용 오차 ±{format_korean_amount(tolerance)})"
     )
+    mixed = _mixed_basis(query, matched, failed)
     if matched is None:
         reason += " -> 어느 기준과도 맞지 않습니다"
     elif not query.fs_div:
         reason += f" -> {matched.fs_label} 기준과 일치"
+        if mixed:
+            reason += f" (다만 {mixed} 기준과는 다릅니다)"
 
     return NumericVerification(
         verdict=Verdict.SUPPORTED if matched else Verdict.CONTRADICTED,
@@ -191,6 +223,7 @@ def _verify_amount(query: NumericQuery, facts: list[FinancialFact]) -> NumericVe
         unit="원",
         matched_fs=matched.fs_div if matched else "",
         fs_explicit=bool(query.fs_div),
+        mixed_basis=mixed,
         tolerance=tolerance,
         evidence=[_fact_line(fact) for fact in facts],
     )
@@ -300,16 +333,20 @@ def _verify_growth(
 
     observed_parts: list[str] = []
     matched: tuple[FinancialFact, float] | None = None
+    failed: list[str] = []
     for current, previous in pairs:
         if previous.amount == 0:
             continue
         # 기준값이 음수면 증감률의 부호가 뒤집혀 해석이 어렵습니다.
         rate = (current.amount - previous.amount) / abs(previous.amount) * 100
         observed_parts.append(f"{current.fs_label} {rate:+.1f}%")
-        if matched is None and intervals_overlap(
+        if intervals_overlap(
             claimed - tolerance, claimed + tolerance, rate, rate
         ):
-            matched = (current, rate)
+            if matched is None:
+                matched = (current, rate)
+        else:
+            failed.append(current.fs_label)
 
     if not observed_parts:
         return NumericVerification(
@@ -323,10 +360,13 @@ def _verify_growth(
         f"{_baseline_label(query)} 실제 {' / '.join(observed_parts)}, "
         f"주장 {claimed:+.1f}% (허용 오차 ±{tolerance:.1f}%p)"
     )
+    mixed = _mixed_basis(query, matched[0] if matched else None, failed)
     if matched is None:
         reason += " -> 어느 기준과도 맞지 않습니다"
     elif not query.fs_div:
         reason += f" -> {matched[0].fs_label} 기준과 일치"
+        if mixed:
+            reason += f" (다만 {mixed} 기준과는 다릅니다)"
 
     return NumericVerification(
         verdict=Verdict.SUPPORTED if matched else Verdict.CONTRADICTED,
@@ -334,6 +374,7 @@ def _verify_growth(
         claimed=claimed,
         observed=matched[1] if matched else None,
         unit="%",
+        mixed_basis=mixed,
         matched_fs=matched[0].fs_div if matched else "",
         fs_explicit=bool(query.fs_div),
         tolerance=tolerance,
@@ -359,6 +400,8 @@ def _verify_direction(
 
     observed_parts: list[str] = []
     matched: FinancialFact | None = None
+    failed: list[str] = []
+    opposite = "감소" if wanted is Direction.UP else "증가"
     for current, previous in pairs:
         delta = current.amount - previous.amount
         actual = Direction.UP if delta > 0 else (Direction.DOWN if delta < 0 else Direction.NONE)
@@ -366,8 +409,11 @@ def _verify_direction(
             f"{current.fs_label} {format_korean_amount(previous.amount)} -> "
             f"{format_korean_amount(current.amount)}"
         )
-        if matched is None and actual is wanted:
-            matched = current
+        if actual is wanted:
+            if matched is None:
+                matched = current
+        else:
+            failed.append(current.fs_label)
 
     first = pairs[0][0]
     label = "증가/개선" if wanted is Direction.UP else "감소/악화"
@@ -376,15 +422,19 @@ def _verify_direction(
         f"{first.bsns_year}년 {first.period_label} {first.account} "
         f"{_baseline_label(query)} {' / '.join(observed_parts)}, 주장은 {label}"
     )
+    mixed = _mixed_basis(query, matched, failed)
     if matched is None:
         reason += " -> 방향이 맞지 않습니다"
     elif not query.fs_div:
         reason += f" -> {matched.fs_label} 기준과 일치"
+        if mixed:
+            reason += f" (다만 {mixed} 기준으로는 {opposite}했습니다)"
 
     return NumericVerification(
         verdict=Verdict.SUPPORTED if matched else Verdict.CONTRADICTED,
         reason=reason,
         matched_fs=matched.fs_div if matched else "",
         fs_explicit=bool(query.fs_div),
+        mixed_basis=mixed,
         evidence=[_fact_line(current) for current, _ in pairs],
     )
