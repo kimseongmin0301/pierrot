@@ -55,8 +55,10 @@ body {
 .shell { max-width: 960px; margin: 0 auto; padding: 48px 24px 100px;
   display: flex; flex-direction: column; gap: 34px; }
 
-.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .15em;
-  text-transform: uppercase; color: var(--ink-faint); }
+/* 라벨류는 본문 글꼴로 둡니다. mono + 넓은 자간 + uppercase 는 라틴 전용
+   조합이라, 한글에 걸면 "환 각 검 증" 처럼 글자가 흩어집니다. */
+.eyebrow { font-family: var(--sans); font-size: 11.5px; font-weight: 600;
+  letter-spacing: .02em; color: var(--ink-faint); }
 
 h1 { margin: 0; font-size: clamp(28px, 4.4vw, 40px); font-weight: 700;
   letter-spacing: -.025em; text-wrap: balance; line-height: 1.22; }
@@ -69,8 +71,9 @@ p { margin: 0; max-width: 72ch; }
 .lede { color: var(--ink-soft); font-size: 16px; max-width: 68ch; }
 
 .meta { display: flex; flex-wrap: wrap; gap: 6px 20px; margin-top: 4px;
-  font-family: var(--mono); font-size: 12px; color: var(--ink-faint); }
-.meta b { color: var(--ink-soft); font-weight: 500; }
+  font-size: 12.5px; color: var(--ink-faint); }
+/* 숫자만 mono 로 둡니다. 숫자가 줄 맞춰 보이는 것이 이 줄의 목적입니다. */
+.meta b { font-family: var(--mono); color: var(--ink-soft); font-weight: 500; }
 
 section.card {
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
@@ -82,21 +85,36 @@ section.card > h2 + p { margin-top: -2px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 12px; }
 .tile { background: var(--surface-sunk); border: 1px solid var(--line);
   border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 1px; }
-.tile .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .09em;
-  text-transform: uppercase; color: var(--ink-faint); }
+.tile .k { font-family: var(--sans); font-size: 11.5px; font-weight: 600;
+  letter-spacing: 0; color: var(--ink-faint); }
 .tile .v { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums;
   letter-spacing: -.025em; line-height: 1.3; }
 .tile .s { font-size: 12px; color: var(--ink-soft); line-height: 1.5; }
 
+/* 가로로 넘치는 것들은 자기 안에서만 스크롤해야 합니다.
+   flex 자식은 min-width 가 auto 라서, 안에 든 표가 넓으면 카드 자체를
+   밀어내 좁은 화면에서 본문이 잘립니다. min-width:0 으로 끊어 줍니다. */
 .scroll { overflow-x: auto; }
-table { border-collapse: collapse; width: 100%; min-width: 480px;
+.scroll, pre, .flow, .scene, table { min-width: 0; max-width: 100%; }
+.scroll > table { min-width: 480px; max-width: none; }
+.scroll > table { border-collapse: collapse; width: 100%;
   font-variant-numeric: tabular-nums; }
 th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--line);
   font-size: 13.5px; }
 th:first-child, td:first-child { text-align: left; }
-thead th { font-family: var(--mono); font-size: 10.5px; letter-spacing: .07em;
-  text-transform: uppercase; color: var(--ink-faint); font-weight: 500;
-  vertical-align: bottom; }
+/* 숫자 표가 기본이라 오른쪽 정렬이지만, 글이 들어가는 표는 왼쪽이 맞습니다.
+   오른쪽 정렬된 문장은 줄바꿈 지점이 들쭉날쭉해 읽기 어렵습니다. */
+table.prose th, table.prose td { text-align: left; vertical-align: top; }
+table.prose td { line-height: 1.6; word-break: keep-all; }
+/* 첫 칸이 좁으면 "전망입니 / 다" 처럼 낱말 가운데서 끊깁니다. */
+table.prose { min-width: 680px; }
+table.prose th:first-child, table.prose td:first-child { width: 27%; }
+table.prose th:nth-child(2), table.prose td:nth-child(2) { width: 30%; }
+/* 이름·숫자·설명이 섞인 표. 숫자 칸만 오른쪽으로 두고 나머지는 왼쪽입니다. */
+table.routes th, table.routes td { text-align: left; }
+table.routes th.num, table.routes td.num { text-align: right; }
+thead th { font-family: var(--sans); font-size: 11.5px; letter-spacing: 0;
+  color: var(--ink-faint); font-weight: 600; vertical-align: bottom; }
 tbody tr:last-child td { border-bottom: none; }
 tr.pick td { background: var(--accent-soft); font-weight: 600; }
 .good { color: var(--good); font-weight: 600; }
@@ -130,8 +148,32 @@ li b, p b { color: var(--ink); font-weight: 600; }
 
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
 
-.mermaid { background: var(--surface-sunk); border: 1px solid var(--line);
-  border-radius: 8px; padding: 16px; overflow-x: auto; }
+/* 흐름도. 전에는 mermaid 문법을 그대로 뒀는데, 그건 아티팩트 플랫폼이
+   그려 주는 것이라 자체 호스팅 페이지에서는 소스가 그대로 보였습니다.
+   라이브러리 없이 CSS 만으로 그립니다. */
+.flow { display: flex; align-items: center; gap: 10px; overflow-x: auto;
+  background: var(--surface-sunk); border: 1px solid var(--line);
+  border-radius: 10px; padding: 16px; }
+.flow .col { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.flow .col.routes { gap: 6px; }
+.flow .arr { flex: none; color: var(--ink-faint); font-size: 15px; }
+.flow .node { background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 9px 12px; font-size: 12.5px; font-weight: 600;
+  line-height: 1.45; white-space: nowrap; color: var(--ink); }
+.flow .node span { display: block; font-weight: 400; font-size: 11px;
+  color: var(--ink-faint); }
+.flow .node i { font-family: var(--mono); font-style: normal; font-size: 10px;
+  font-weight: 600; letter-spacing: .04em; color: var(--accent);
+  display: block; margin-bottom: 1px; }
+.flow .node.in, .flow .node.out { border-color: var(--line-strong); font-weight: 700; }
+.flow .node.pick { border-color: var(--accent); color: var(--accent); }
+.flow .node.soft { color: var(--ink-soft); }
+.flow-note { font-size: 12.5px; margin-top: -4px; }
+@media (max-width: 760px) {
+  .flow { flex-direction: column; align-items: stretch; }
+  .flow .arr { transform: rotate(90deg); align-self: center; }
+  .flow .node { white-space: normal; }
+}
 
 /* 30초 요약. 면접장에서 화면으로 띄워 멀리서 읽는 용도라
    본문보다 한 단계 크게 잡습니다. */
@@ -139,8 +181,8 @@ li b, p b { color: var(--ink); font-weight: 600; }
   border-radius: 14px; padding: 30px 30px 28px; box-shadow: var(--shadow);
   display: flex; flex-direction: column; gap: 20px; }
 .hero .step { display: flex; flex-direction: column; gap: 7px; }
-.hero .label { font-family: var(--mono); font-size: 11px; letter-spacing: .13em;
-  text-transform: uppercase; color: var(--accent); font-weight: 600; }
+.hero .label { font-family: var(--sans); font-size: 11.5px; letter-spacing: .02em;
+  color: var(--accent); font-weight: 700; }
 .hero .line { font-size: clamp(17px, 2.2vw, 21px); line-height: 1.52;
   letter-spacing: -.015em; max-width: 60ch; }
 .hero .line b { font-weight: 700; }
@@ -229,7 +271,7 @@ footer { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
         <div class="n good">100%</div>
         <div class="t">정답을 아는 문제 500개에서 <b>틀린 문장을 전부 적발</b>.
           맞는 문장을 틀렸다고 한 건 <b>0건</b>.<br>
-          <span class="dim">같은 문제에서 AI 에게 직접 물어보면 46.2%</span></div>
+          <span class="dim">같은 문제를 AI 에게 직접 물어보면 46.2% 만 잡습니다.</span></div>
       </div>
       <div>
         <div class="n">53.9%</div>
@@ -278,25 +320,35 @@ footer { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
       공시·주가 데이터와 대조합니다. <b>라우팅은 LLM 이 아니라 규칙</b>입니다.
       세 갈래 분류에 호출 비용을 치를 이유가 없고, 규칙은 테스트로 고정할 수 있기 때문입니다.
     </p>
-    <pre class="mermaid">
-flowchart LR
-  A["답변"] --> B["주장 분해<br/>gpt-4o-mini"]
-  B --> C["탈맥락화<br/>회사·시점 채우기"]
-  C --> D{"라우팅<br/>규칙 기반"}
-  D -->|PRICE| E["주가 스냅샷<br/>조회·계산"]
-  D -->|NUMERIC| F["DART 재무<br/>대조"]
-  D -->|SEGMENT| G["부문별 매출 표"]
-  D -->|NARRATIVE| H["검색 + NLI"]
-  D -->|FORECAST| I["검증 대상 아님<br/>사유 기록"]
-  F -.계정 없음.-> G
-  E --> J["판정 + 근거"]
-  F --> J
-  G --> J
-  H --> J
-  I --> J
-    </pre>
-    <p class="dim">
-      LangGraph 상태 머신으로 구현했습니다. 경로 선택 사유와 시도 기록이 결과에 남아,
+    <div class="flow" aria-label="검증 흐름">
+      <div class="col">
+        <div class="node in">답변</div>
+      </div>
+      <div class="arr" aria-hidden="true">→</div>
+      <div class="col">
+        <div class="node">주장 분해<span>gpt-4o-mini</span></div>
+        <div class="node">탈맥락화<span>회사·시점 채우기</span></div>
+      </div>
+      <div class="arr" aria-hidden="true">→</div>
+      <div class="col">
+        <div class="node pick">라우팅<span>규칙 기반 · LLM 없음</span></div>
+      </div>
+      <div class="arr" aria-hidden="true">→</div>
+      <div class="col routes">
+        <div class="node"><i>PRICE</i>주가 스냅샷 조회·계산</div>
+        <div class="node"><i>NUMERIC</i>DART 재무 대조</div>
+        <div class="node"><i>SEGMENT</i>부문별 매출 표</div>
+        <div class="node soft"><i>NARRATIVE</i>검색 + NLI</div>
+        <div class="node soft"><i>FORECAST</i>검증 대상 아님 · 사유 기록</div>
+      </div>
+      <div class="arr" aria-hidden="true">→</div>
+      <div class="col">
+        <div class="node out">판정 + 근거</div>
+      </div>
+    </div>
+    <p class="dim flow-note">
+      재무 경로가 "주요계정에 없음"으로 끝나면 부문별 매출 표로 한 번 더 보냅니다.
+      LangGraph 상태 머신으로 구현했고, 경로 선택 사유와 시도 기록이 결과에 남아
       "왜 이 주장이 이 도구로 갔는지"를 나중에 추적할 수 있습니다.
     </p>
   </section>
@@ -383,18 +435,18 @@ NAVER   2024년 1분기 광고 부문   주장 5조 7,839억  vs  <b>전사 1분
       <b>고쳐야 할 곳이 완전히 다릅니다.</b>
     </p>
     <div class="scroll">
-      <table>
-        <thead><tr><th>원인</th><th>건수</th><th>고칠 수 있는가</th></tr></thead>
+      <table class="routes">
+        <thead><tr><th>원인</th><th class="num">건수</th><th>고칠 수 있는가</th></tr></thead>
         <tbody>
-          <tr><td>전망·권고 주장</td><td>18</td><td class="dim">설계대로. 거르지 않고 흘려보냄</td></tr>
-          <tr><td>재무제표에 없는 계정</td><td>9</td><td class="good">도구 추가로 가능</td></tr>
-          <tr><td>검색·NLI 한계</td><td>8</td><td class="warn">임베딩 검색 후보</td></tr>
-          <tr><td>인과·변동성 등 수치 대조 불가</td><td>5</td><td class="dim">검증 대상 아님</td></tr>
-          <tr><td>공시에 그 부문이 없음</td><td>5</td><td class="dim">공시의 한계</td></tr>
-          <tr><td>부문 수치인데 매출이 아님</td><td>3</td><td class="dim">공시의 한계</td></tr>
-          <tr><td>주장에 수치가 없음</td><td>3</td><td class="dim">검증 대상 아님</td></tr>
-          <tr><td>기간이 너무 넓어 판정 불가</td><td>1</td><td class="dim">오탐 방지 가드</td></tr>
-          <tr><td>스냅샷 수집 범위</td><td>1</td><td class="good">재수집으로 가능</td></tr>
+          <tr><td>전망·권고 주장</td><td class="num">18</td><td class="dim">설계대로. 거르지 않고 흘려보냄</td></tr>
+          <tr><td>재무제표에 없는 계정</td><td class="num">9</td><td class="good">도구 추가로 가능</td></tr>
+          <tr><td>검색·NLI 한계</td><td class="num">8</td><td class="warn">임베딩 검색 후보</td></tr>
+          <tr><td>인과·변동성 등 수치 대조 불가</td><td class="num">5</td><td class="dim">검증 대상 아님</td></tr>
+          <tr><td>공시에 그 부문이 없음</td><td class="num">5</td><td class="dim">공시의 한계</td></tr>
+          <tr><td>부문 수치인데 매출이 아님</td><td class="num">3</td><td class="dim">공시의 한계</td></tr>
+          <tr><td>주장에 수치가 없음</td><td class="num">3</td><td class="dim">검증 대상 아님</td></tr>
+          <tr><td>기간이 너무 넓어 판정 불가</td><td class="num">1</td><td class="dim">오탐 방지 가드</td></tr>
+          <tr><td>스냅샷 수집 범위</td><td class="num">1</td><td class="good">재수집으로 가능</td></tr>
         </tbody>
       </table>
     </div>
@@ -487,7 +539,7 @@ NAVER   2024년 1분기 광고 부문   주장 5조 7,839억  vs  <b>전사 1분
       무엇이 없어서 못 봤는지 적혀 있어야 다음에 무엇을 모을지 정할 수 있습니다.
     </p>
     <div class="scroll">
-      <table>
+      <table class="prose">
         <thead><tr><th>문장</th><th>전에 나오던 사유</th><th>지금 나오는 사유</th></tr></thead>
         <tbody>
           <tr><td>2027년 매출 목표를 달성했다</td>
@@ -513,9 +565,9 @@ NAVER   2024년 1분기 광고 부문   주장 5조 7,839억  vs  <b>전사 1분
     <div class="fix">
       <div class="t">덤으로 찾은 것 — 비용이 늘 $0 으로 보고되고 있었습니다</div>
       <div>20건을 돌리고 "$0.00000"이 찍혔는데 비용 로그는 $0.025 늘어 있었습니다.
-        비용 로거 인스턴스가 둘이어서 <b>차이를 재는 쪽이 아무것도 못 보고</b> 있었습니다.
-        월 예산 $5 를 지키려고 만든 장치가 아무것도 못 보고 있었던 것입니다.
-        계측기도 검증해야 합니다.</div>
+        비용 로거 인스턴스가 둘이어서 <b>차이를 재는 쪽에는 아무것도 기록되지 않았습니다.</b>
+        월 예산 $5 를 지키려고 만든 장치가 정작 지출을 보지 못하고 있었던 것입니다.
+        <b>계측기도 검증해야 합니다.</b></div>
     </div>
   </section>
 
@@ -526,16 +578,16 @@ NAVER   2024년 1분기 광고 부문   주장 5조 7,839억  vs  <b>전사 1분
       94건 중 <b>43건의 경로를 뒤집었습니다.</b>
     </p>
     <div class="scroll">
-      <table>
-        <thead><tr><th>추출기 유형</th><th>→ 에이전트 경로</th><th>건수</th><th>효과</th></tr></thead>
+      <table class="routes">
+        <thead><tr><th>추출기 유형</th><th>에이전트 경로</th><th class="num">건수</th><th>효과</th></tr></thead>
         <tbody>
-          <tr><td>NARRATIVE</td><td>FORECAST</td><td>14</td><td class="dim">전망을 검증 대상에서 분리</td></tr>
-          <tr><td>NUMERIC</td><td>SEGMENT</td><td>9</td><td>부문별 매출 표로</td></tr>
-          <tr><td>NARRATIVE</td><td>NUMERIC</td><td>8</td><td class="good">NLI 대신 수치 대조로</td></tr>
-          <tr><td>NARRATIVE</td><td>PRICE</td><td>5</td><td class="good">NLI 대신 주가 계산으로</td></tr>
-          <tr><td>NUMERIC</td><td>FORECAST</td><td>4</td><td class="dim">전망을 분리</td></tr>
-          <tr><td>NARRATIVE</td><td>SEGMENT</td><td>3</td><td>부문별 매출 표로</td></tr>
-          <tr><td>NUMERIC</td><td>PRICE</td><td>1</td><td class="good">"주가 수익률"을 주가 도구로</td></tr>
+          <tr><td>NARRATIVE</td><td>FORECAST</td><td class="num">14</td><td class="dim">전망을 검증 대상에서 분리</td></tr>
+          <tr><td>NUMERIC</td><td>SEGMENT</td><td class="num">9</td><td>부문별 매출 표로</td></tr>
+          <tr><td>NARRATIVE</td><td>NUMERIC</td><td class="num">8</td><td class="good">NLI 대신 수치 대조로</td></tr>
+          <tr><td>NARRATIVE</td><td>PRICE</td><td class="num">5</td><td class="good">NLI 대신 주가 계산으로</td></tr>
+          <tr><td>NUMERIC</td><td>FORECAST</td><td class="num">4</td><td class="dim">전망을 분리</td></tr>
+          <tr><td>NARRATIVE</td><td>SEGMENT</td><td class="num">3</td><td>부문별 매출 표로</td></tr>
+          <tr><td>NUMERIC</td><td>PRICE</td><td class="num">1</td><td class="good">"주가 수익률"을 주가 도구로</td></tr>
         </tbody>
       </table>
     </div>
@@ -546,7 +598,7 @@ NAVER   2024년 1분기 광고 부문   주장 5조 7,839억  vs  <b>전사 1분
     </p>
     <pre>LG엔솔  2024년 1분기 영업이익 "전년 대비 +28%"  →  실제 <b>-75.2%</b>   <span class="f">모순</span>
 카카오  2024년 3월 말~5월 8일 주가 "약 26% 하락"   →  실제 <b>-9.3% ~ -7.1%</b>  <span class="f">모순</span></pre>
-    <h3>대체 경로는 재 보고 껐습니다</h3>
+    <h3>대체 경로는 재어 보고 껐습니다</h3>
     <p>
       도구가 판정하지 못할 때 NLI 로 한 번 더 보내면 커버리지가 10%p 오릅니다.
       <b>그래서 늘어난 9건을 전수 검토했습니다.</b> 근거가 타당한 것은 1건이었고,
@@ -699,7 +751,7 @@ NAVER   2024년 1분기 광고 부문   주장 5조 7,839억  vs  <b>전사 1분
       <div class="tile"><div class="k">주가</div><div class="v">18,920</div>
         <div class="s">20종목 · 2023-01 ~ 2026-11<br>수정주가 + 원주가</div></div>
       <div class="tile"><div class="k">재무 (DART)</div><div class="v">7,466</div>
-        <div class="s">20종목 × <b>2022</b>~2026<br>연결/별도 · 계정 11종</div></div>
+        <div class="s">20종목 × <b>2022~2026</b><br>연결/별도 · 계정 11종</div></div>
       <div class="tile"><div class="k">부문별 매출</div><div class="v">2,040</div>
         <div class="s">사업보고서 60건의 표<br>검수 이상 0건</div></div>
       <div class="tile"><div class="k">배당·추가 계정</div><div class="v">446</div>
