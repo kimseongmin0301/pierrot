@@ -47,6 +47,8 @@
 
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -189,6 +191,34 @@ def invented_company(original: str, rewritten: str, answer: str, names: tuple[st
     return ""
 
 
+# 기간을 가리키지만 **어느 때인지 정하지 못하는** 말들.
+# "최근 매출이 감소했다" 는 어느 해인지 알 수 없습니다.
+VAGUE_PERIOD = re.compile(r"최근|예전|요즘|근래|한동안|얼마\s*전|그간|그동안")
+
+YEAR = re.compile(r"(19|20)\d{2}\s*년")
+
+
+def invented_period(original: str, rewritten: str, answer: str) -> str:
+    """원문에 없는 **연도**를 새로 넣었으면 그 연도를 돌려줍니다.
+
+    실측(가상 샘플 100건, 048/068):
+
+        원문   "Kakao의 최근 연결 매출은 크게 증가했습니다"
+        다시 씀 "Kakao의 2024년 연결 매출이 크게 증가했다"   <- 2024 는 어디에도 없음
+
+    '최근' 을 지우고 연도로 바꿔치기해 **흔적조차 남지 않았습니다.** 그 연도로
+    조회하면 엉뚱한 해의 수치와 대조하게 되고, 근거는 CALCULATED 로 찍혀
+    가장 믿을 만한 등급이 붙습니다. 회사를 지어내는 것과 같은 종류의 사고입니다.
+
+    답변 어딘가에 연도가 있으면 맥락에서 끌어온 것이므로 막지 않습니다.
+    막는 것은 **답변 전체에 연도가 하나도 없는데** 연도가 생긴 경우뿐입니다.
+    """
+    if YEAR.search(original) or YEAR.search(answer):
+        return ""
+    found = YEAR.search(rewritten)
+    return found.group(0) if found else ""
+
+
 def build_decontextualizer(
     *, settings: Settings | None = None, temperature: float = 0.0
 ) -> Any:
@@ -284,6 +314,7 @@ def decontextualize(
 
     rewritten = list(claims)
     invented: list[str] = []
+    made_up_years: list[str] = []
     for number, (position, claim, _) in enumerate(targets, 1):
         text = (by_number[number].text or "").strip()
         if not text or text == claim.text:
@@ -296,9 +327,18 @@ def decontextualize(
             invented.append(f"{made_up}({claim.claim_id})")
             continue
 
+        # 원문 어디에도 없는 연도를 새로 넣었으면 되돌립니다.
+        # '최근' 을 연도로 바꿔치기하면 흔적이 남지 않아 더 위험합니다.
+        guessed = invented_period(claim.text, text, answer)
+        if guessed:
+            made_up_years.append(f"{guessed}({claim.claim_id})")
+            continue
+
         rewritten[position] = claim.model_copy(update={"text": text})
 
-    note = ""
+    notes = []
     if invented:
-        note = "원문에 없는 회사를 넣으려 해 되돌렸습니다: " + ", ".join(invented)
-    return rewritten, note
+        notes.append("원문에 없는 회사를 넣으려 해 되돌렸습니다: " + ", ".join(invented))
+    if made_up_years:
+        notes.append("원문에 없는 연도를 넣으려 해 되돌렸습니다: " + ", ".join(made_up_years))
+    return rewritten, " / ".join(notes)

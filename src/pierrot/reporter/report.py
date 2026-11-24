@@ -286,20 +286,86 @@ def find_uncovered(answer: str, claims: list[ClaimReport]) -> list[UncoveredSent
         offset = end
         if not piece.strip():
             continue
-        covered = any(
-            claim_start < end and start < claim_end for claim_start, claim_end in spans
-        )
-        if covered:
-            continue
-        why = (
-            "전망·권고로 보입니다. 지금 참·거짓을 가릴 수 없습니다"
-            if looks_like_forecast(piece)
-            else "주장으로 분해되지 않았습니다"
-        )
-        found.append(
-            UncoveredSentence(text=piece.strip(), start=start, end=end, why=why)
-        )
+        for chunk_start, chunk_end in _uncovered_chunks(text, start, end, spans):
+            chunk = text[chunk_start:chunk_end]
+            if not _worth_reporting(chunk):
+                continue
+            why = (
+                "전망·권고로 보입니다. 지금 참·거짓을 가릴 수 없습니다"
+                if looks_like_forecast(chunk)
+                else "주장으로 분해되지 않았습니다"
+            )
+            found.append(
+                UncoveredSentence(
+                    text=_TRIM.sub("", chunk), start=chunk_start, end=chunk_end, why=why
+                )
+            )
     return found
+
+
+# 문장 안에서 절을 가르는 자리. 쉼표는 넣지 않습니다 — "32,300억" 이 부서집니다.
+_CLAUSE_SPLIT = re.compile(
+    r"(?:으며|하며|이며|했으며|였으며|으나|이나|지만|하나|했으나|하였으나|하고|했고)\s*"
+    r"|(?:반면|하지만|다만|또한)\s"
+)
+
+# 절 하나로 볼 최소 길이. 조각이 너무 짧으면 잡음입니다.
+_MIN_CHUNK = 8
+
+# 조각 양 끝의 공백과 문장 부호. 이것만 남은 조각은 보여 줄 가치가 없습니다.
+_TRIM = re.compile(r"^[\s.,·…]+|[\s.,·…]+$")
+
+
+def _worth_reporting(chunk: str) -> bool:
+    """사람에게 보여 줄 만한 조각인지. 토막 부스러기는 거릅니다."""
+    return len(_TRIM.sub("", chunk)) >= _MIN_CHUNK
+
+
+def _uncovered_chunks(
+    text: str, start: int, end: int, spans: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """문장 [start, end) 안에서 **어느 주장도 덮지 않은 구간**을 돌려줍니다.
+
+    전에는 문장 단위로만 봤습니다. 그래서 문장 앞쪽 절에 주장이 하나라도
+    붙으면 **뒤쪽 절이 통째로 사라져도 알 수 없었습니다.**
+
+    실측(가상 샘플 100건, 009 등 7건):
+
+        "비용 절감 덕분에 전년보다 동일했으며, 2027년에는 역대 최대 이익을 달성할 것입니다."
+         └─ 주장으로 뽑힌 구간 ─┘  └──── 흔적 없이 사라진 절 ────┘
+
+    앞 절에 주장이 붙어 문장이 '다뤄진 것' 으로 보였고, 뒤 절의 미래 단정은
+    주장 목록에도 uncovered 에도 남지 않았습니다. 읽는 사람은 그 주장이
+    검사를 통과한 줄 압니다.
+    """
+    inside = sorted(
+        (max(s, start), min(e, end))
+        for s, e in spans
+        if s < end and start < e
+    )
+    if not inside:
+        return [(start, end)]
+
+    # 주장이 덮은 구간을 뺀 나머지가 '빈 곳' 입니다.
+    gaps: list[tuple[int, int]] = []
+    cursor = start
+    for span_start, span_end in inside:
+        if span_start > cursor:
+            gaps.append((cursor, span_start))
+        cursor = max(cursor, span_end)
+    if cursor < end:
+        gaps.append((cursor, end))
+
+    # 빈 곳을 절 경계로 다듬습니다. 이음말이 앞에 남으면 읽기 나쁩니다.
+    trimmed: list[tuple[int, int]] = []
+    for gap_start, gap_end in gaps:
+        chunk = text[gap_start:gap_end]
+        offset = 0
+        for match in _CLAUSE_SPLIT.finditer(chunk):
+            if match.start() <= 2:          # 조각 맨 앞의 이음말만 떼어 냅니다
+                offset = match.end()
+        trimmed.append((gap_start + offset, gap_end))
+    return trimmed
 
 
 def summarize(results: list[VerificationResult]) -> Summary:

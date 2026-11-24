@@ -19,6 +19,8 @@ from __future__ import annotations
 import re
 
 from ..extractor.quality import has_amount, looks_like_forecast
+from ..tools.value_judgment import REASON as VALUE_JUDGMENT_REASON
+from ..tools.value_judgment import is_value_judgment
 from .state import Route
 
 # 1단계 품질 휴리스틱(`quality.looks_like_forecast`)이 못 잡는 전망 표현입니다.
@@ -79,6 +81,14 @@ def classify(claim_text: str, declared_type: str) -> tuple[Route, str]:
 
     if is_forecast(text):
         return Route.FORECAST, "전망·권고 표현이 있어 지금 참·거짓을 가릴 수 없습니다"
+
+    # 평가 표현은 의미 비교로 넘기면 안 됩니다.
+    #
+    # "좋은 실적을 냈다" 를 NLI 에 보내면 함의 0.998 / 모순 0.999 처럼
+    # 양쪽이 동시에 높게 나와 어느 쪽으로 갈라져도 근거가 되지 못합니다.
+    # 전망과 같은 이유로 FORECAST 경로(검증 대상 아님)에 둡니다.
+    if is_value_judgment(text):
+        return Route.FORECAST, VALUE_JUDGMENT_REASON
 
     price_hits = PRICE_PATTERN.findall(text)
     numeric_hits = NUMERIC_PATTERN.findall(text)
