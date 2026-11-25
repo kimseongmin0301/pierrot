@@ -24,6 +24,7 @@ from .dart import ACCOUNT_ALIASES
 from .direction_rescue import find_claims, rescue
 from .delta_claim import detect as detect_delta
 from .equality_claim import detect as detect_equality
+from .level_claim import detect as detect_level
 from .range_claim import detect as detect_range
 from .superlative import detect as detect_superlative
 from .turnaround import detect as detect_turnaround
@@ -455,6 +456,35 @@ def build_query(
             ),
             stock, None, "", turnaround=kind,
         )
+
+    # 금액이 적혀 있는데 방향만 말한 것처럼 읽힌 문장도 **파서보다 먼저** 봅니다.
+    #
+    # "순이익은 3조 5,000억 원으로 증가했다" 를 파서가 DIRECTION 으로 읽으면
+    # 늘었는지만 보고 통과시킵니다. 실제 4조 5,581억원이라 적힌 금액은
+    # 1조가 틀렸는데도 '근거 있음' 이 났습니다. 방향이 맞다고 금액까지
+    # 맞은 것은 아닙니다.
+    #
+    # 적힌 금액을 AMOUNT 로 돌려놓아 **금액 자체를 대조하게** 합니다.
+    level_amount, _ = detect_level(claim_text)
+    if level_amount and parse_korean_amount(level_amount) is not None:
+        stock = find_stock(parsed.company)
+        if stock is None:
+            return NumericQuery(
+                parsed, None, None,
+                f"유니버스에 없는 종목입니다: {parsed.company or '(표기 없음)'}",
+            )
+        if not parsed.bsns_year or parsed.bsns_year < 1900:
+            return NumericQuery(parsed, stock, None, "사업연도를 특정할 수 없습니다")
+        if parsed.account not in KNOWN_ACCOUNTS:
+            return NumericQuery(
+                parsed, stock, None,
+                f"다룰 수 없는 계정입니다: {parsed.account or '(표기 없음)'}",
+            )
+        parsed = parsed.model_copy(update={
+            "is_financial_claim": True,
+            "assertion": FinancialAssertion.AMOUNT,
+            "amount_text": level_amount,
+        })
 
     # 한 문장에 사실이 여럿이면 **전부** 확인해야 합니다.
     #

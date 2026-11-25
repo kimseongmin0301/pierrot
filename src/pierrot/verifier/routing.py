@@ -20,6 +20,7 @@ import re
 
 from ..extractor.quality import has_amount, looks_like_forecast
 from ..tools.value_judgment import REASON as VALUE_JUDGMENT_REASON
+from ..tools.meta_statement import META_REASON, is_meta_statement
 from ..tools.value_judgment import is_value_judgment
 from .state import Route
 
@@ -81,6 +82,15 @@ def classify(claim_text: str, declared_type: str) -> tuple[Route, str]:
 
     if is_forecast(text):
         return Route.FORECAST, "전망·권고 표현이 있어 지금 참·거짓을 가릴 수 없습니다"
+
+    # 답변이 스스로에 대해 말한 문장도 마찬가지입니다.
+    #
+    # "SK하이닉스는 미래에 대한 예측은 할 수 없다" 는 회사에 대한 사실이
+    # 아니라 말하는 쪽의 사정입니다. 모델이 거부한 문장에 다듬기가 주어를
+    # 붙여 만들어집니다. 공시와 견주면 모순 0.999 가 나오지만 공시에
+    # 그 답이 있을 리 없습니다.
+    if is_meta_statement(text):
+        return Route.FORECAST, META_REASON
 
     # 평가 표현은 의미 비교로 넘기면 안 됩니다.
     #

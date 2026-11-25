@@ -53,6 +53,19 @@ class DateRange:
     precision: DatePrecision
     raw: str = ""
 
+    anchor: str = ""
+    """구간 안에서 **어느 한 날**을 가리키는 표현이면 그 쪽을 적습니다.
+
+    "FIRST" 는 구간의 첫 거래일, "LAST" 는 마지막 거래일입니다.
+
+    왜 필요한가: "연초 대비 10% 상승" 에서 '연초' 를 1월 전체로 읽으면
+    기준값이 통째로 벌어집니다. 실측에서 KB금융 2023년 1월 종가가
+    47,600~60,000원이라 등락률 범위가 -9.3%~+14.3% 가 됐고, 틀린 주장
+    (+10%, 실제 +14.3%)이 그 안에 들어가 **근거 있음으로 통과**했습니다.
+    한 주로 좁혀도 폭이 19.1% 라 모자랍니다. '연초' 는 그 해 **첫 거래일**
+    하나를 뜻하므로, 구간이 아니라 점으로 다뤄야 합니다.
+    """
+
     @property
     def days(self) -> int:
         return (self.end - self.start).days + 1
@@ -101,6 +114,11 @@ _Y_HALF = re.compile(r"(\d{4})\s*년\s*(상반기|하반기)")
 _HALF_ONLY = re.compile(r"(상반기|하반기)")
 _YEAR = re.compile(r"(\d{4})\s*년")
 
+# 연초·연말. 그 해의 첫/마지막 거래일 **한 날**을 가리킵니다.
+# 연도가 앞에 붙은 것부터 맞춰야 "2023년 연초" 가 제대로 잡힙니다.
+_Y_YEAR_EDGE = re.compile(r"(\d{4})\s*년\s*(연초|연말)")
+_YEAR_EDGE = re.compile(r"(연초|연말)")
+
 
 def resolve_date_expression(
     expression: str,
@@ -123,6 +141,21 @@ def resolve_date_expression(
     text = expression.strip()
     raw = text
     reference_year = reference.year if reference else None
+
+    # 0) 연초·연말. 다른 패턴보다 **먼저** 봅니다. "2023년 연초" 를 뒤쪽
+    #    _YEAR 패턴이 먼저 집으면 그 해 전체(365일)가 되어 버립니다.
+    match = _Y_YEAR_EDGE.search(text) or (
+        _YEAR_EDGE.search(text) if reference_year else None
+    )
+    if match:
+        groups = match.groups()
+        if len(groups) == 2:
+            year, label = int(groups[0]), groups[1]
+        else:
+            year, label = reference_year, groups[0]
+        edge = _year_edge_range(year, label, raw)
+        if edge is not None:
+            return edge
 
     # 1) 정확한 하루
     match = _ISO.search(text)
@@ -214,6 +247,24 @@ def resolve_date_expression(
     return None
 
 
+def _year_edge_range(year: int, label: str, raw: str) -> DateRange | None:
+    """'연초'/'연말' 을 그 해 첫·마지막 거래일을 담는 좁은 구간으로.
+
+    달력만으로는 어느 날이 거래일인지 알 수 없습니다. 그래서 며칠짜리
+    구간으로 두되 `anchor` 에 어느 쪽 끝을 쓸지 적어 둡니다. 실제로 어느
+    날을 쓸지는 주가 스냅샷을 가진 쪽(`price_verify`)이 정합니다.
+    """
+    if not year:
+        return None
+    if label == "연초":
+        return DateRange(date(year, 1, 1), date(year, 1, 10),
+                         DatePrecision.RANGE, raw, anchor="FIRST")
+    if label == "연말":
+        return DateRange(date(year, 12, 20), date(year, 12, 31),
+                         DatePrecision.RANGE, raw, anchor="LAST")
+    return None
+
+
 def _tenday_range(year: int, month: int, label: str, raw: str) -> DateRange | None:
     if not 1 <= month <= 12:
         return None
@@ -265,3 +316,42 @@ def combine(start: DateRange, end: DateRange) -> DateRange:
         precision,
         f"{start.raw} ~ {end.raw}".strip(" ~"),
     )
+
+
+def narrow_to_year_edge(window: DateRange | None, source: str, label: str) -> DateRange | None:
+    """문장에 '연초'/'연말' 이 남아 있으면 구간을 그 한 날로 좁힙니다.
+
+    왜 필요한가
+    -----------
+    날짜 해석기는 '연초' 를 이미 한 날로 봅니다(`_year_edge_range`). 그런데
+    그 말이 해석기까지 **도달하지 못하는 길**이 있습니다. 6단계 다듬기가
+    맥락을 채우면서 '연초 대비' 를 "2023년 1월부터 ... 연초 대비" 로 펼쳐
+    놓으면, 파서는 더 또렷해 보이는 "2023년 1월" 을 시작 표현으로 고릅니다.
+    그 순간 한 날이 한 달이 되고, 기준값이 47,600~60,000원으로 퍼집니다.
+
+    실측(gpt-4o-mini 답변 40건):
+
+        "KB금융의 주가는 2023년 1월부터 2023년 10월 25일까지 연초 대비 약 10% 상승했다"
+        -> 1월 전체를 기준으로 삼아 등락률 -9.33% ~ +14.29%
+        -> 주장 +10% 가 그 안에 들어가 **근거 있음** 으로 통과
+        실제는 47,600 -> 54,400 으로 +14.29% 라 틀린 주장입니다.
+
+    안전장치
+    --------
+    좁힌 구간이 원래 구간 **안에 들어갈 때만** 바꿉니다. 파서가 "2023년 3월"
+    처럼 더 좁은 시점을 집어냈다면 그쪽이 더 정확한 정보이므로 건드리지
+    않습니다. 문장 어딘가의 '연말' 때문에 엉뚱한 구간이 끌려가는 것을 막습니다.
+
+    Args:
+        window: 파서가 고른 표현으로 해석한 구간.
+        source: 주장 원문. 여기에 '연초'/'연말' 이 있는지 봅니다.
+        label: "연초" 또는 "연말".
+    """
+    if window is None or window.anchor or label not in source:
+        return window
+    edge = _year_edge_range(window.start.year, label, window.raw)
+    if edge is None:
+        return window
+    if not (window.start <= edge.start and edge.end <= window.end):
+        return window
+    return DateRange(edge.start, edge.end, edge.precision, window.raw, anchor=edge.anchor)

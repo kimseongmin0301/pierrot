@@ -9,10 +9,16 @@
 
 실행 (API 비용 없음):
     .venv/Scripts/python.exe scripts/analyze_unverifiable.py
+    .venv/Scripts/python.exe scripts/analyze_unverifiable.py --result 결과.json
+
+`--result` 는 `scripts/verify_batch.py --out` 이 만든 JSON 도 받습니다.
+실제 LLM 답변을 돌린 결과에 같은 분류를 쓰기 위한 것입니다. 분류 기준을
+두 벌로 두면 수치가 어긋나므로 한 벌만 둡니다.
 """
 
 from __future__ import annotations
 
+import argparse
 import collections
 import json
 import sys
@@ -54,7 +60,9 @@ RULES: list[tuple[str, tuple[str, ...], str]] = [
     (
         "주장에 수치가 없음",
         ("비교할 가격 수치가 없습니다", "비교할 증감률 수치가 없습니다",
-         "금액을 읽을 수 없습니다", "비교할 금액이 없습니다"),
+         "금액을 읽을 수 없습니다", "비교할 금액이 없습니다",
+         "수치가 없고 방향만", "수치가 없으므로", "구체적인 수치가 없",
+         "비교 대상 수치가 없어"),
         "값을 말하지 않은 주장입니다. 수치 대조로는 가릴 수 없습니다.",
     ),
     (
@@ -82,8 +90,20 @@ RULES: list[tuple[str, tuple[str, ...], str]] = [
     (
         "도구가 다룰 수 없는 주장",
         ("주가 조회로 확인할 수 있는 주장이 아닙니다", "부문별 실적 주장이 아닙니다",
-         "판정 방법이 정해지지 않은 주장입니다", "부문 이름을 찾을 수 없습니다"),
+         "판정 방법이 정해지지 않은 주장입니다", "부문 이름을 찾을 수 없습니다",
+         "재무제표 조회로 확인할 수 있는 주장이 아닙니다",
+         "재무 조회 조건으로 변환할 수 없습니다"),
         "변동성·인과 등 수치 대조 대상이 아닙니다.",
+    ),
+    (
+        "부문 주장인데 금액이 없음",
+        ("부문 주장에 금액이 적혀 있지 않습니다",),
+        "부문별 표와는 금액으로만 대조합니다. 자료에 연도별 수치가 있으니 고칠 수 있습니다.",
+    ),
+    (
+        "휴장·스냅샷 밖이라 거래일이 없음",
+        ("구간에 거래일이 없습니다", "해당 기간에 거래일이 없습니다"),
+        "직전 거래일까지 거슬러 봐도 없는 경우입니다. 수집 범위를 넓히면 일부 풀립니다.",
     ),
     (
         "근거를 찾았으나 판정 못 함 (NLI)",
@@ -101,13 +121,39 @@ def classify(reason: str) -> str:
     return "기타"
 
 
+def load_rows(path: Path) -> list[dict]:
+    """판정 한 건을 담은 사전들의 목록으로 바꿉니다.
+
+    두 가지 형식을 받습니다.
+      - JSONL: 한 줄에 판정 하나 (`scripts/run_verifier.py`)
+      - JSON : 답변마다 `claims` 목록 (`scripts/verify_batch.py --out`)
+    """
+    text = path.read_text(encoding="utf-8")
+    if path.suffix == ".jsonl":
+        return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+    rows = []
+    for answer in json.loads(text):
+        for claim in answer["claims"]:
+            rows.append({
+                "verdict": claim["verdict"],
+                "reason": claim["reason"],
+                "claim_text": claim["text"],
+            })
+    return rows
+
+
 def main() -> int:
-    if not RESULT_PATH.exists():
-        print(f"결과 파일이 없습니다: {RESULT_PATH}")
+    parser = argparse.ArgumentParser(description="확인 불가 원인 분류")
+    parser.add_argument("--result", type=Path, default=RESULT_PATH)
+    args = parser.parse_args()
+
+    if not args.result.exists():
+        print(f"결과 파일이 없습니다: {args.result}")
         print("먼저 scripts/run_verifier.py 를 실행해 주십시오.")
         return 1
 
-    rows = [json.loads(line) for line in RESULT_PATH.open(encoding="utf-8") if line.strip()]
+    rows = load_rows(args.result)
     unverifiable = [row for row in rows if row["verdict"] == "UNVERIFIABLE"]
 
     print("=" * 100)
@@ -136,7 +182,8 @@ def main() -> int:
     # 고쳐야 할 곳별로 묶습니다.
     groups = {
         "1단계 주장 분해를 고쳐야 함": ["주장에 시점이 없음", "주장에 종목이 없음"],
-        "데이터를 더 붙이면 풀림": ["재무제표에 없는 계정", "스냅샷에 수치가 없음"],
+        "데이터를 더 붙이면 풀림": ["재무제표에 없는 계정", "스냅샷에 수치가 없음",
+                           "부문 주장인데 금액이 없음", "휴장·스냅샷 밖이라 거래일이 없음"],
         "공시에 데이터가 없음 (한계)": ["부문 수치인데 매출이 아님", "공시에 그 부문이 없음"],
         "검증 대상이 아님": ["검증 대상 아님 (전망·권고)", "도구가 다룰 수 없는 주장",
                        "주장에 수치가 없음", "기간이 너무 넓어 판정 불가"],

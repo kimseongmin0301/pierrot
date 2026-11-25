@@ -266,9 +266,23 @@ def test_out_of_snapshot_range_is_unverifiable(snapshot):
     assert "스냅샷 범위" in result.reason
 
 
-def test_window_without_trading_days_is_unverifiable(snapshot):
-    """구간 안에 거래일이 하나도 없으면 판정할 수 없습니다."""
+def test_휴장일은_직전_거래일로_봅니다(snapshot):
+    """예전에는 '거래일이 없습니다' 로 끝냈습니다.
+
+    자료가 없어서가 아니라 그날 장이 안 선 것뿐이라, 시장 관례대로
+    직전 거래일 종가를 봅니다. 4월 2일 직전 거래일은 4월 1일(종가 70,000원)
+    이므로 71,800원 주장은 틀립니다. 어느 날을 봤는지는 사유에 남깁니다.
+    """
     query = make_query(point_date_expr="2024년 4월 2일", value_low=71800, value_high=71800)
+    result = verify_price_claim(query, snapshot)
+    assert result.verdict is Verdict.CONTRADICTED
+    assert "70,000원" in result.reason
+    assert "휴장" in result.reason and "2024-04-01" in result.reason
+
+
+def test_직전_거래일이_너무_멀면_판정하지_않습니다(snapshot):
+    """연휴를 덮을 만큼만 거슬러 봅니다. 그 이상이면 다른 기간입니다."""
+    query = make_query(point_date_expr="2024년 4월 27일", value_low=71800, value_high=71800)
     result = verify_price_claim(query, snapshot)
     assert result.verdict is Verdict.UNVERIFIABLE
 

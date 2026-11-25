@@ -28,7 +28,13 @@ from pydantic import BaseModel, Field
 
 from ..config import Settings, get_settings
 from ..llm import get_openai_chat
-from .dates import DatePrecision, DateRange, combine, resolve_date_expression
+from .dates import (
+    DatePrecision,
+    DateRange,
+    combine,
+    narrow_to_year_edge,
+    resolve_date_expression,
+)
 from .universe import Stock, find_stock
 
 PARSER_VERSION = "v1"
@@ -218,13 +224,19 @@ class PriceQuery:
 
 
 def build_query(
-    parsed: ParsedPriceClaim, *, reference: date | None = None
+    parsed: ParsedPriceClaim,
+    *,
+    reference: date | None = None,
+    source: str = "",
 ) -> PriceQuery:
     """파싱 결과를 조회 조건으로 확정합니다.
 
     여기서 종목코드 매핑과 날짜 해석이 일어납니다. 실패하면 그 이유를 남깁니다.
     이유를 남기는 것이 중요합니다. "검증 못 했다"가 아니라 "왜 못 했다"가 있어야
     분해 품질을 개선할 지점을 찾을 수 있습니다.
+
+    `source` 는 주장 원문입니다. 파서가 고른 날짜 표현만으로는 알 수 없는
+    것을 되살리는 데 씁니다. '연초 대비' 가 그렇습니다.
     """
     if not parsed.is_price_claim or parsed.assertion is PriceAssertion.OTHER:
         return PriceQuery(parsed, None, None, None, None, "주가 조회로 확인할 수 있는 주장이 아닙니다")
@@ -237,6 +249,9 @@ def build_query(
     if parsed.assertion is PriceAssertion.CHANGE_RATE:
         start = resolve_date_expression(parsed.start_date_expr, reference=reference)
         end = resolve_date_expression(parsed.end_date_expr, reference=reference)
+        # '연초 대비' 가 한 달로 펼쳐져 들어오는 길이 있습니다. 원문을 보고 되돌립니다.
+        start = narrow_to_year_edge(start, source, "연초")
+        end = narrow_to_year_edge(end, source, "연말")
         if start is None or end is None:
             missing = []
             if start is None:
@@ -295,4 +310,4 @@ def parse_price_claim(
     )
     if isinstance(parsed, dict):
         parsed = ParsedPriceClaim.model_validate(parsed)
-    return build_query(parsed, reference=reference)
+    return build_query(parsed, reference=reference, source=claim_text)

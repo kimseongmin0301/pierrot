@@ -43,6 +43,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from enum import Enum
 
 from .dates import DatePrecision, DateRange
@@ -236,7 +237,11 @@ def _verify_level(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVerificati
     assert query.stock is not None and query.window is not None
     code = query.stock.code
     window = query.window
-    rows = snapshot.rows_between(code, window.start, window.end)
+    # '연말 주가는 70,000원' 처럼 한 날을 가리키는 표현이면 구간을 그 날로 좁힙니다.
+    # 좁히지 않으면 12/20~12/31 의 74,800~78,500 중 낮은 쪽이 걸려 통과합니다.
+    # 실제 마지막 거래일 종가는 78,500원이라 틀린 주장입니다.
+    rows, holiday_note = _with_holiday_fallback(snapshot, code, window)
+    rows = _anchored(rows, window.anchor)
 
     if not rows:
         return PriceVerification(
@@ -318,6 +323,7 @@ def _verify_level(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVerificati
         f"주장 {claimed_text}"
     )
     reason += f" (허용 오차 ±{tolerance:,.0f}원)"
+    reason += holiday_note
     if not supported:
         reason += " -> 겹치지 않습니다"
 
@@ -338,16 +344,76 @@ def _verify_level(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVerificati
     )
 
 
+def _anchored(rows: list[PriceRow], anchor: str) -> list[PriceRow]:
+    """'연초'처럼 한 날을 가리키는 구간이면 거래일 하나만 남깁니다.
+
+    실측 오탐(gpt-4o-mini 답변):
+
+        "KB금융 주가는 2023년 연초 대비 약 10% 상승했다"
+        '연초' 를 1월 전체로 읽어 기준값이 47,600~60,000원으로 퍼졌고,
+        등락률 범위가 -9.3% ~ +14.3% 가 되어 **+10% 가 그 안에 들어가
+        통과**했습니다. 실제는 +14.29% 라 틀린 주장입니다.
+
+    구간 폭 상한(25%p)이 있었지만 이 건은 23.6%p 라 간신히 빠져나갔습니다.
+    상한을 조이는 것은 답이 아닙니다. '연초' 는 애초에 구간이 아니라
+    **그 해 첫 거래일 하나**를 뜻하기 때문입니다.
+    """
+    if not rows or not anchor:
+        return rows
+    ordered = sorted(rows, key=lambda row: row.date)
+    return [ordered[0]] if anchor == "FIRST" else [ordered[-1]]
+
+
+# 한국 증시는 1월 1일과 12월 31일에 쉽니다. 주말·공휴일도 마찬가지입니다.
+#
+# 실측(gpt-4o-mini 답변 40건): 확인 불가 112건 중 **14건**이 이것뿐이었습니다.
+#
+#     "현대차의 주가는 2023년 12월 31일 기준으로 200,000원이었다"
+#     -> 2023-12-31 은 휴장일이라 "거래일이 없습니다" 로 끝났습니다.
+#
+# 자료가 없어서가 아니라 **그날 장이 안 섰기 때문**입니다. 고칠 수 있는
+# 한계인데 못 고친 것처럼 보고하고 있었습니다.
+#
+# 시장 관례대로 **직전 거래일 종가**를 씁니다. "12월 31일 종가" 는 실무에서
+# 그 해 마지막 거래일 종가를 가리킵니다.
+HOLIDAY_LOOKBACK_DAYS = 7
+"""며칠까지 거슬러 볼지. 연휴를 덮되 그 이상 벌어지면 다른 기간입니다."""
+
+
+def _with_holiday_fallback(
+    snapshot: PriceSnapshot, code: str, window: DateRange
+) -> tuple[list[PriceRow], str]:
+    """구간에 거래일이 없으면 직전 거래일까지 거슬러 봅니다.
+
+    Returns:
+        (거래일 목록, 덧붙일 사유). 거슬러 올라가지 않았으면 사유는 빈 문자열.
+        그래야 읽는 사람이 **언제를 본 것인지** 알 수 있습니다.
+    """
+    rows = snapshot.rows_between(code, window.start, window.end)
+    if rows:
+        return rows, ""
+
+    earlier = snapshot.rows_between(
+        code, window.start - timedelta(days=HOLIDAY_LOOKBACK_DAYS), window.end
+    )
+    if not earlier:
+        return [], ""
+
+    last = max(earlier, key=lambda row: row.date)
+    return [last], f" ({window.describe()} 은 휴장이라 직전 거래일 {last.date} 로 봅니다)"
+
+
 def _verify_change_rate(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVerification:
     """두 시점 사이 등락률 주장."""
     assert query.stock is not None and query.window is not None
     assert query.start_window is not None and query.end_window is not None
     code = query.stock.code
 
-    start_rows = snapshot.rows_between(
-        code, query.start_window.start, query.start_window.end
-    )
-    end_rows = snapshot.rows_between(code, query.end_window.start, query.end_window.end)
+    start_raw, start_note = _with_holiday_fallback(snapshot, code, query.start_window)
+    end_raw, end_note = _with_holiday_fallback(snapshot, code, query.end_window)
+    start_rows = _anchored(start_raw, query.start_window.anchor)
+    end_rows = _anchored(end_raw, query.end_window.anchor)
+    holiday_note = start_note + end_note
 
     if not start_rows or not end_rows:
         missing = "시작" if not start_rows else "끝"
@@ -425,6 +491,7 @@ def _verify_change_rate(query: PriceQuery, snapshot: PriceSnapshot) -> PriceVeri
         f"실제 등락률 {observed_text}, 주장 {claimed_text}"
     )
     reason += f" (허용 오차 ±{tolerance_pp:.2f}%p)"
+    reason += holiday_note
     if not supported:
         reason += " -> 겹치지 않습니다"
 
