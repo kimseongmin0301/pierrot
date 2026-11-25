@@ -286,9 +286,10 @@ footer { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
         100% 는 <b>자료가 있는 문장</b>에 한한 숫자입니다.
       </div>
       <div class="sub">
-        그래서 판정하지 못한 53건을 원인별로 전부 분류했습니다.
-        <b>판정 가능 비율의 상한이 100% 가 아니라 약 75%</b> 라는 것이 거기서 나왔습니다.
-        28.7% 는 애초에 참·거짓을 가릴 수 있는 종류의 문장이 아닙니다.
+        실제 답변에서 뽑은 주장은 <b>94개</b>였고 그중 41개를 판정했습니다.
+        나머지 53개를 원인별로 전부 분류했더니, <b>24개(25.5%)는 미래 전망이나
+        인과처럼 애초에 참·거짓을 가릴 수 있는 종류가 아니었습니다.</b>
+        그래서 이 지표의 상한은 100% 가 아니라 약 75% 입니다.
       </div>
     </div>
   </section>
@@ -296,20 +297,21 @@ footer { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
   <section class="card">
     <h2>한눈에</h2>
     <div class="tiles">
-      <div class="tile"><div class="k">도구 기반 재현율</div><div class="v good">100%</div>
-        <div class="s">거짓 주장 52건을 전부 적발<br>오탐 0건</div></div>
-      <div class="tile"><div class="k">실제 답변 커버리지</div><div class="v">53.9%</div>
-        <div class="s">전망 주장 제외 기준<br>전체 기준 43.6%</div></div>
-      <div class="tile"><div class="k">NLI 베이스라인</div><div class="v bad">15.4%</div>
-        <div class="s">어려운 셋 재현율<br>오탐률 45.3%</div></div>
-      <div class="tile"><div class="k">함정 20건 오탐</div><div class="v good">0건</div>
-        <div class="s">주장 45개 중 44개 정답<br>고치기 전 오탐 2건</div></div>
+      <div class="tile"><div class="k">재현율 · 틀린 문장을 잡아낸 비율</div><div class="v good">100%</div>
+        <div class="s">정답 500건 중 거짓 주장 52건을<br>하나도 빠뜨리지 않음</div></div>
+      <div class="tile"><div class="k">오탐률 · 맞는 문장을 틀렸다 한 비율</div><div class="v good">0%</div>
+        <div class="s">같은 500건에서<br>한 건도 없음</div></div>
+      <div class="tile"><div class="k">커버리지 · 판정까지 간 비율</div><div class="v">43.6%</div>
+        <div class="s">실제 AI 답변 94개 주장 중 41개<br>미래 전망 18개를 빼면 53.9%</div></div>
+      <div class="tile"><div class="k">함정 20건에서 낸 오탐</div><div class="v good">0건</div>
+        <div class="s">주장 45개 중 44개 정답<br>고치기 전에는 오탐 2건</div></div>
     </div>
     <p class="note">
-      두 숫자를 나란히 둔 이유가 이 프로젝트의 요지입니다.
-      <b>100%는 "데이터가 있는 주장을 정확히 판정한다"</b>는 뜻이고,
-      <b>53.9%는 "실제 답변의 절반쯤만 그 조건에 해당한다"</b>는 뜻입니다.
-      하나만 내면 둘 중 하나를 숨기게 됩니다.
+      앞의 두 숫자와 세 번째 숫자를 나란히 둔 것이 이 프로젝트의 요지입니다.
+      <b>100% / 0% 는 "자료가 있는 주장은 정확히 판정한다"</b>는 뜻이고,
+      <b>43.6% 는 "실제 답변 중 그 조건에 해당하는 것이 절반도 안 된다"</b>는 뜻입니다.
+      앞만 내면 잘하는 것처럼 보이고, 뒤만 내면 쓸모없어 보입니다.
+      둘을 같이 내야 이 검증기를 어디까지 믿어도 되는지 알 수 있습니다.
     </p>
   </section>
 
@@ -452,7 +454,7 @@ NAVER   2024년 1분기 광고 부문   주장 5조 7,839억  vs  <b>전사 1분
     </div>
     <p class="note">
       <b>커버리지의 이론적 상한은 100% 가 아니라 약 75% 입니다.</b>
-      27건(28.7%)은 애초에 참·거짓을 가릴 수 있는 종류의 문장이 아닙니다.
+      94건 중 24건(25.5%)은 애초에 참·거짓을 가릴 수 있는 종류의 문장이 아닙니다.
       이 표가 없으면 "커버리지 43.6%"를 보고 엉뚱한 곳을 고치게 됩니다.
     </p>
     <p class="dim">
