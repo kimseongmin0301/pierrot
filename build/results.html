@@ -407,22 +407,23 @@ footer { font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
   <section class="card">
     <h2>측정 2 — 실제 LLM 답변 94건</h2>
     <p>
-      로컬 <code>gemma3:4b</code> 가 만든 금융 답변 10건을 주장 94개로 쪼개
-      에이전트에 통째로 넣었습니다. 테스트셋과 달리 <b>데이터가 있다는 보장이 없습니다.</b>
+      누가 쓴 글을 누가 검증했는지부터 밝힙니다.
+      <b>검증 대상</b>은 로컬 소형 모델 <code>gemma3:4b</code> 가 쓴 금융 답변 10건이고,
+      <b>검증한 쪽</b>은 PIERROT 입니다. 그 답변에서 주장 94개를 뽑아
+      공시·주가와 대조했습니다. 테스트셋과 달리 <b>자료가 있다는 보장이 없습니다.</b>
     </p>
     <div class="tiles">
-      <div class="tile"><div class="k">모순으로 적발</div><div class="v bad">41</div>
-        <div class="s">근거와 어긋난 주장</div></div>
-      <div class="tile"><div class="k">계산으로 대조</div><div class="v">39</div>
-        <div class="s">수치를 직접 비교<br>나머지 2건은 NLI 추정</div></div>
-      <div class="tile"><div class="k">확인 불가</div><div class="v">53</div>
-        <div class="s">사유를 전부 기록</div></div>
-      <div class="tile"><div class="k">근거 있음</div><div class="v">0</div>
-        <div class="s">맞는 수치가 하나도 없었음</div></div>
+      <div class="tile"><div class="k">틀렸다고 판정</div><div class="v bad">41</div>
+        <div class="s">공시와 달랐음<br>39건은 직접 계산, 2건은 NLI 추정</div></div>
+      <div class="tile"><div class="k">맞다고 확인</div><div class="v">0</div>
+        <div class="s">gemma3:4b 가 말한 수치 중<br>실제와 맞는 것이 없었음</div></div>
+      <div class="tile"><div class="k">가릴 수 없었음</div><div class="v">53</div>
+        <div class="s">미래 전망이거나<br>공시에 그 항목이 없음</div></div>
     </div>
     <p>
-      <b>근거 있음이 0건입니다.</b> <code>gemma3:4b</code> 가 말한 수치 중 실제와 맞는 것이
-      하나도 없었습니다. 작은 모델이 금융 수치를 얼마나 지어내는지 보여 줍니다.
+      <b>맞다고 확인된 것이 0건입니다.</b> 판정까지 간 41건이 전부 틀렸다는 뜻입니다.
+      검증기가 못 했다는 말이 아니라 <b>작은 모델이 금융 수치를 얼마나 지어내는지</b>
+      보여 주는 숫자입니다. 아래가 그 41건 중 다섯 개입니다.
     </p>
     <pre>삼성전자 2024년 3분기 영업이익   주장 6조 1,879억  vs  실제 <b>9조 1,833억</b>   <span class="f">모순</span>
 LG엔솔   2024년 1분기 영업이익    주장 <b>+28%</b>        vs  실제 <b>-75.2%</b>      <span class="f">모순</span>
