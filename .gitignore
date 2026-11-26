@@ -54,3 +54,7 @@ build/*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ===== 개인 검토 문서 =====
+# 공개 저장소입니다. 받아 둔 검토 문서는 올리지 않습니다.
+docs/*review*.md
