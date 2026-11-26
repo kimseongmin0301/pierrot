@@ -229,6 +229,11 @@ LLM 답변을 검증 가능한 주장(claim) 단위로 분해하고, 근거 문�
       확인 불가 101건: 검증 대상 아님 43 / 데이터 추가로 가능 20 /
       NLI 한계 15 / 주장 분해 13 / 공시 한계 9 -> 커버리지 상한 약 77.6%
       633 tests passed, 4단계 지표 100%/0%/커버리지 100% 유지
+      판정 원본을 저장소에 남김(다시 돌리지 않고 되짚을 수 있게):
+        evaluation/datasets/real_verifications_openai_before_fix.json  (참 9, 그중 5건 오탐)
+        evaluation/datasets/real_verifications_openai.json             (참 6, 오탐 0)
+      되짚기: scripts/audit_real_answers.py <파일>
+      원인 분류: scripts/analyze_unverifiable.py --result <파일>
 - [ ] 다음 후보 — 의미 비교(NLI) 판정의 근거 관련성 /
       부문 주장의 증감 방향 판정(자료는 있음) /
       임베딩 검색(8건) / generator 모듈 패키지화
